@@ -96,7 +96,6 @@ def main():
             best_rf_model, X_reduced, model_type="tree"
         )
         # Gestione compatibilità per le nuove versioni della libreria SHAP
-        import numpy as np
         if isinstance(shap_values, list):
             sv = shap_values[1]
         elif np.ndim(shap_values) == 3:
