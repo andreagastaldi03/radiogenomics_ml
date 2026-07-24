@@ -18,43 +18,80 @@ import config
 # ---------------------------------------------------------------------------
 # CARICAMENTO
 # ---------------------------------------------------------------------------
-def load_data(source: str = config.DATA_SOURCE):
+def normalize_id(patient_id):
+    if pd.isna(patient_id):
+        return None
+    patient_str = str(patient_id)
+    match = re.search(r'\d+', patient_str)
+    return match.group(0) if match else patient_str.strip()
+
+def load_data(source: str = "both"):
     """
     Carica radiomica/genomica/entrambe e le allinea alla label per patient_id.
 
+    Parametri
+    -------
+    source: str ("radiomics", "genomics", "both")
+
     Ritorna
     -------
-    X : pd.DataFrame (righe=pazienti, colonne=feature)
-    y : pd.Series (label originale, es. "ADK"/"SCC")
+    X : pd.DataFrame (righe=pazienti, colonne=feature normalizzate e pre-fissate)
+    y : pd.Series (valori 0 per ADK, 1 per SCC)
     """
-    labels = pd.read_csv(config.LABELS_PATH)
-    labels = labels.set_index(config.ID_COL)[config.LABEL_COL]
+    # 1. Caricamento e allineamento LABELS
+    labels_raw = pd.read_excel(LABELS_PATH, index_col=0).T
+    labels_raw.columns = labels_raw.columns.str.strip()
+    
+    # Applichiamo la normalizzazione e mappiamo le classi (ADK=0, SCC=1)
+    labels_raw['ID_Normalizzato'] = labels_raw[ID_COL].apply(normalize_id)
+    labels_raw['Target'] = labels_raw[LABEL_COL].map({'ADK': 0, 'SCC': 1})
+    
+    # Creiamo la Series finale pulita
+    y_all = labels_raw.set_index('ID_Normalizzato')['Target'].dropna()
 
     frames = []
+
+    # 2. Caricamento e pulizia RADIOMICA
     if source in ("radiomics", "both"):
-        rad = pd.read_csv(config.RADIOMICS_PATH).set_index(config.ID_COL)
+        rad = pd.read_csv(RADIOMICS_PATH, index_col=0)
+        # Sostituzione virgole e cast a float
+        rad = rad.replace(',', '.', regex=True).apply(pd.to_numeric, errors='coerce')
+        # Normalizzazione indici e rinomina colonne
+        rad.index = [normalize_id(idx) for idx in rad.index]
         rad.columns = [f"rad__{c}" for c in rad.columns]
         frames.append(rad)
+
+    # 3. Caricamento e pulizia GENOMICA
     if source in ("genomics", "both"):
-        gen = pd.read_csv(config.GENOMICS_PATH).set_index(config.ID_COL)
+        gen = pd.read_excel(GENOMICS_PATH, index_col=0)
+        # Rimuoviamo le ultime due colonne non utili e trasponiamo (pazienti sulle righe)
+        gen = gen.iloc[:, :-2].T
+        # Normalizzazione indici e rinomina colonne
+        gen.index = [normalize_id(idx) for idx in gen.index]
         gen.columns = [f"gen__{c}" for c in gen.columns]
         frames.append(gen)
 
     if not frames:
-        raise ValueError(f"source non valido: {source}")
+        raise ValueError(f"Parametro 'source' non valido: {source}")
 
-    X = pd.concat(frames, axis=1, join="inner")
-    common_idx = X.index.intersection(labels.index)
+    # 4. Concatenazione dei blocchi feature
+    X_all = pd.concat(frames, axis=1, join="inner")
 
-    X = X.loc[common_idx].sort_index()
-    y = labels.loc[common_idx].sort_index()
+    # 5. Inner Join finale tra Feature (X) e Target (y)
+    common_idx = X_all.index.intersection(y_all.index)
+    X = X_all.loc[common_idx].sort_index()
+    y = y_all.loc[common_idx].sort_index()
 
-    assert X.shape[0] == y.shape[0], "Disallineamento tra feature e label dopo il merge"
-    print(f"[load_data] source={source} | pazienti={X.shape[0]} | feature={X.shape[1]}")
-    print(f"[load_data] distribuzione classi:\n{y.value_counts()}")
+    # Controllo di integrità
+    assert X.shape[0] == y.shape[0], "Errore critico: Disallineamento tra feature e label dopo il merge."
+    
+    print(f"--- [load_data] completato ---")
+    print(f"Source richiesto  : {source.upper()}")
+    print(f"Pazienti allineati: {X.shape[0]}")
+    print(f"Predittori totali : {X.shape[1]}")
+    print(f"Distribuzione     :\n{y.value_counts().to_string()}\n")
 
     return X, y
-
 
 # ---------------------------------------------------------------------------
 # FILTRO PER VARIANZA

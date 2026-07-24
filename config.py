@@ -15,15 +15,15 @@ from pathlib import Path
 # Se hai già due file separati (radiomica / genomica), impostali qui e uniscili
 # in data_utils.load_data(). Il codice è già predisposto per entrambi i casi.
 
-DATA_DIR = Path("/home/claude/radiogenomics_ml/data")
-OUTPUT_DIR = Path("/home/claude/radiogenomics_ml/outputs")
+DATA_DIR = Path("/home/andreagastaldi/radiogenomics_ml/data")
+OUTPUT_DIR = Path("/home/andreagastaldi/radiogenomics_ml/outputs")
 
-RADIOMICS_PATH = DATA_DIR / "radiomics_features.csv"   # 107 feature
-GENOMICS_PATH = DATA_DIR / "genomics_features.csv"      # 750 geni
-LABELS_PATH = DATA_DIR / "labels.csv"                   # patient_id, label
+RADIOMICS_PATH = DATA_DIR / "out_CTinvivo_roiOrig.csv"          # 107 feature
+GENOMICS_PATH = DATA_DIR / "geni_normalizzati_R_250226.xlsx"    # 750 geni
+LABELS_PATH = DATA_DIR / "Tabella_di_conversione_completa.xlsx" # patient_id, label
 
-ID_COL = "patient_id"
-LABEL_COL = "label"
+ID_COL = "Nome micro CT"
+LABEL_COL = "fenotipo"
 POSITIVE_CLASS = "ADK"   # classe codificata come 1 nelle metriche (scelta arbitraria, per coerenza)
 
 # ---------------------------------------------------------------------------
@@ -32,8 +32,6 @@ POSITIVE_CLASS = "ADK"   # classe codificata come 1 nelle metriche (scelta arbit
 # "radiomics"  -> solo feature TAC
 # "genomics"   -> solo feature genomiche
 # "both"       -> early fusion (concatenazione)
-# Ti consiglio di lanciare la pipeline 3 volte, una per ciascuna opzione,
-# e confrontare i risultati: è di per sé un risultato scientifico.
 DATA_SOURCE = "both"
 
 # ---------------------------------------------------------------------------
