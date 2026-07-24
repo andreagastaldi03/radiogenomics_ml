@@ -45,7 +45,8 @@ def load_data(source: str = "both"):
     
     # Applichiamo la normalizzazione e mappiamo le classi (ADK=0, SCC=1)
     labels_raw['ID_Normalizzato'] = labels_raw[config.ID_COL].apply(normalize_id)
-    labels_raw['Target'] = labels_raw[config.LABEL_COL].map({'ADK': 0, 'SCC': 1})
+    # Mantiene il testo originale (es. "ADK", "SCC"), rimuovendo eventuali spazi invisibili
+    labels_raw['Target'] = labels_raw[config.LABEL_COL].astype(str).str.strip()
     
     # Creiamo la Series finale pulita
     y_all = labels_raw.set_index('ID_Normalizzato')['Target'].dropna()
