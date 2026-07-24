@@ -1,0 +1,17 @@
+# --- Jupyter e Python ---
+.ipynb_checkpoints/
+__pycache__/
+*.pyc
+
+# --- Dati del progetto (DA IGNORARE) ---
+# Ignora tutti i file CSV e di testo
+*.csv
+*.xlsx
+
+# Oppure ignora intere cartelle (consigliato)
+data/
+
+
+# --- Ambienti Virtuali ---
+.env
+venv/
