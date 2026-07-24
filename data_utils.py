@@ -9,6 +9,7 @@ il modello ML sia per lo studio di rete, senza circolarità statistica.
 
 import numpy as np
 import pandas as pd
+import re
 from scipy.cluster.hierarchy import linkage, fcluster
 from scipy.spatial.distance import squareform
 
@@ -39,12 +40,12 @@ def load_data(source: str = "both"):
     y : pd.Series (valori 0 per ADK, 1 per SCC)
     """
     # 1. Caricamento e allineamento LABELS
-    labels_raw = pd.read_excel(LABELS_PATH, index_col=0).T
+    labels_raw = pd.read_excel(config.LABELS_PATH, index_col=0).T
     labels_raw.columns = labels_raw.columns.str.strip()
     
     # Applichiamo la normalizzazione e mappiamo le classi (ADK=0, SCC=1)
-    labels_raw['ID_Normalizzato'] = labels_raw[ID_COL].apply(normalize_id)
-    labels_raw['Target'] = labels_raw[LABEL_COL].map({'ADK': 0, 'SCC': 1})
+    labels_raw['ID_Normalizzato'] = labels_raw[config.ID_COL].apply(normalize_id)
+    labels_raw['Target'] = labels_raw[config.LABEL_COL].map({'ADK': 0, 'SCC': 1})
     
     # Creiamo la Series finale pulita
     y_all = labels_raw.set_index('ID_Normalizzato')['Target'].dropna()
@@ -53,7 +54,7 @@ def load_data(source: str = "both"):
 
     # 2. Caricamento e pulizia RADIOMICA
     if source in ("radiomics", "both"):
-        rad = pd.read_csv(RADIOMICS_PATH, index_col=0)
+        rad = pd.read_csv(config.RADIOMICS_PATH, index_col=0)
         # Sostituzione virgole e cast a float
         rad = rad.replace(',', '.', regex=True).apply(pd.to_numeric, errors='coerce')
         # Normalizzazione indici e rinomina colonne
@@ -63,7 +64,7 @@ def load_data(source: str = "both"):
 
     # 3. Caricamento e pulizia GENOMICA
     if source in ("genomics", "both"):
-        gen = pd.read_excel(GENOMICS_PATH, index_col=0)
+        gen = pd.read_excel(config.GENOMICS_PATH, index_col=0)
         # Rimuoviamo le ultime due colonne non utili e trasponiamo (pazienti sulle righe)
         gen = gen.iloc[:, :-2].T
         # Normalizzazione indici e rinomina colonne
