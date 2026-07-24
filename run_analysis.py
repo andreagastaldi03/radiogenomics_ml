@@ -95,8 +95,15 @@ def main():
         explainer, shap_values, X_transformed = ml_pipeline.shap_analysis(
             best_rf_model, X_reduced, model_type="tree"
         )
-        # per classificazione binaria TreeExplainer ritorna una lista [class0, class1]
-        sv = shap_values[1] if isinstance(shap_values, list) else shap_values
+        # Gestione compatibilità per le nuove versioni della libreria SHAP
+        import numpy as np
+        if isinstance(shap_values, list):
+            sv = shap_values[1]
+        elif np.ndim(shap_values) == 3:
+            # Se è un array 3D (n_samples, n_features, n_classes), prendiamo la classe positiva (indice 1)
+            sv = shap_values[:, :, 1]
+        else:
+            sv = shap_values
         mean_abs_shap = pd.Series(
             np.abs(sv).mean(axis=0), index=X_reduced.columns
         ).sort_values(ascending=False)
