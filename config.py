@@ -15,8 +15,8 @@ from pathlib import Path
 # Se hai già due file separati (radiomica / genomica), impostali qui e uniscili
 # in data_utils.load_data(). Il codice è già predisposto per entrambi i casi.
 
-DATA_DIR = Path("/home/andreagastaldi/radiogenomics_ml/data")
-OUTPUT_DIR = Path("/home/andreagastaldi/radiogenomics_ml/outputs")
+DATA_DIR = Path("/content/drive/MyDrive/problem_solving/project/")
+OUTPUT_DIR = Path("/content/drive/MyDrive/problem_solving/project/outputs")
 
 RADIOMICS_PATH = DATA_DIR / "out_CTinvivo_roiOrig.csv"          # 107 feature
 GENOMICS_PATH = DATA_DIR / "geni_normalizzati_R_250226.xlsx"    # 750 geni
