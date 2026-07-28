@@ -13,6 +13,9 @@ Il modulo produce anche:
 
 import numpy as np
 import pandas as pd
+import matplotlib
+matplotlib.use("Agg")  # backend non interattivo, necessario per salvare plot da script
+import matplotlib.pyplot as plt
 from sklearn.model_selection import StratifiedKFold, GridSearchCV
 from sklearn.preprocessing import StandardScaler
 from sklearn.linear_model import LogisticRegression
@@ -146,6 +149,34 @@ def get_model_grid():
 # o riduzione del loro score a partire dai diversi alberi in successione. alla fine, si applica un 
 # softmax per trasformare il punteggio in probabilità e attribuire una classe.
 
+# Mappa usata per scegliere automaticamente l'explainer SHAP giusto in base
+# al modello risultato migliore (per AUC) nella nested CV, invece di forzare
+# sempre lo stesso modello.
+MODEL_TYPE_MAP = {
+    "elastic_net": "linear",
+    "svm_linear": "linear",
+    "random_forest": "tree",
+    "xgboost": "tree",
+}
+
+def majority_vote_params(best_params_list):
+    """
+    Determina la combinazione di iperparametri più frequentemente scelta
+    come "migliore" tra i fold esterni della nested CV.
+
+    Perché: la nested CV sceglie iperparametri potenzialmente diversi ad ogni
+    fold esterno (normale, con n=54 il tuning è instabile). Per la stability
+    selection bootstrap serve UN solo set di iperparametri fissi (rifare un
+    grid search dentro ognuno dei centinaia di bootstrap sarebbe troppo
+    costoso e statisticamente ridondante). Il voto di maggioranza è un modo
+    semplice e trasparente per sceglierli in modo data-driven, non arbitrario.
+    """
+    param_tuples = [tuple(sorted(p.items())) for p in best_params_list]
+    most_common, count = Counter(param_tuples).most_common(1)[0]
+    print(f"[majority_vote_params] combinazione più frequente: {dict(most_common)} "
+          f"(scelta in {count}/{len(best_params_list)} fold)")
+    return dict(most_common)
+
 # ---------------------------------------------------------------------------
 # NESTED CROSS VALIDATION
 # ---------------------------------------------------------------------------
@@ -234,6 +265,7 @@ def run_all_models(X: pd.DataFrame, y: pd.Series):
 # STABILITY SELECTION (bootstrap) — quali feature emergono ripetutamente
 # ---------------------------------------------------------------------------
 def bootstrap_stability_selection(X: pd.DataFrame, y: pd.Series,
+                                   C: float, l1_ratio: float,
                                    n_bootstrap=config.N_BOOTSTRAP,
                                    threshold=config.STABILITY_SELECTION_THRESHOLD,
                                    random_state=config.RANDOM_STATE):
@@ -245,6 +277,12 @@ def bootstrap_stability_selection(X: pd.DataFrame, y: pd.Series,
     feature sono "affidabilmente" rilevanti e non un artefatto del
     particolare campione osservato. Queste sono le feature da riportare
     come risultato principale, non i coefficienti di un singolo fit.
+    
+    IMPORTANTE: C e l1_ratio NON hanno un default arbitrario qui apposta.
+    Vanno passati quelli scelti dalla nested CV (vedi majority_vote_params
+    su all_results["elastic_net"]["best_params"]), altrimenti la stability
+    selection userebbe un modello diverso da quello effettivamente validato
+    come migliore in run_all_models().
     """
     y_bin = (y == config.POSITIVE_CLASS).astype(int)
     n_samples = X.shape[0]
@@ -257,7 +295,7 @@ def bootstrap_stability_selection(X: pd.DataFrame, y: pd.Series,
         ("scaler", StandardScaler()),
         ("clf", LogisticRegression(
             penalty="elasticnet", solver="saga", max_iter=5000,
-            C=0.1, l1_ratio=0.5, random_state=random_state
+            C=C, l1_ratio=l1_ratio, random_state=random_state
         )),
     ])
 
@@ -288,17 +326,29 @@ def bootstrap_stability_selection(X: pd.DataFrame, y: pd.Series,
 
 
 # ---------------------------------------------------------------------------
-# SHAP — interpretabilità del modello (usare sul modello finale, fit su tutti i dati
-# o su un modello rappresentativo tra i fold)
+# SHAP — interpretabilità del modello 
 # ---------------------------------------------------------------------------
-def shap_analysis(fitted_pipeline, X: pd.DataFrame, model_type="tree"):
+def _transform_with_pipeline_steps(fitted_pipeline, X: pd.DataFrame) -> pd.DataFrame:
+    """Applica tutti gli step della pipeline tranne l'ultimo (il classificatore)."""
+    X_transformed = X.copy()
+    for step_name, step in fitted_pipeline.steps[:-1]: # applica tutte le trasformazioni della pipeline a
+            # X tranne il classificatore, che è l'ultimo (da qui il [:-1])
+        X_transformed = pd.DataFrame(
+            step.transform(X_transformed), columns=X.columns, index=X.index
+        )
+    return X_transformed
+
+def shap_analysis(fitted_pipeline, X: pd.DataFrame, model_type="tree", background_data=None):
     """
-    Calcola valori SHAP per il modello fittato.
+    Calcola valori SHAP per il modello fittato, valutati sui punti in X.
 
     model_type: "tree" per RandomForest/XGBoost, "linear" per Elastic Net/SVM lineare.
-    Ritorna l'oggetto shap_values e l'explainer, utili per i plot successivi
-    (shap.summary_plot, shap.dependence_plot, ecc. — da eseguire in notebook/script separato
-    per la visualizzazione).
+
+    background_data: dataset di riferimento per l'explainer lineare (serve a
+    stimare media/correlazioni delle feature). Per non introdurre leakage,
+    passare SEMPRE il training set del fold (mai il test set su cui si sta
+    spiegando il modello) — vedi out_of_fold_shap più sotto, che lo fa
+    automaticamente.
     """
     if not SHAP_AVAILABLE:
         raise ImportError("Installa 'shap' con: pip install shap")
@@ -306,18 +356,15 @@ def shap_analysis(fitted_pipeline, X: pd.DataFrame, model_type="tree"):
     clf = fitted_pipeline.named_steps["clf"] # estrazione del modello
 
     # applica le trasformazioni precedenti (es. scaler) prima di passare a SHAP
-    X_transformed = X.copy()
-    for step_name, step in fitted_pipeline.steps[:-1]: # applica tutte le trasformazioni della pipeline a
-            # X tranne il classificatore, che è l'ultimo (da qui il [:-1])
-        X_transformed = pd.DataFrame(
-            step.transform(X_transformed), columns=X.columns, index=X.index
-        )
+    X_transformed = _transform_with_pipeline_steps(fitted_pipeline, X)
 
     if model_type == "tree":
         explainer = shap.TreeExplainer(clf) # algoritmi ottimizzati a seconda del modello
         shap_values = explainer.shap_values(X_transformed)
     elif model_type == "linear":
-        explainer = shap.LinearExplainer(clf, X_transformed)
+        bg = background_data if background_data is not None else X
+        bg_transformed = _transform_with_pipeline_steps(fitted_pipeline, bg)
+        explainer = shap.LinearExplainer(clf, bg_transformed)
         shap_values = explainer.shap_values(X_transformed)
     else:
         raise ValueError("model_type deve essere 'tree' o 'linear'")
@@ -326,7 +373,104 @@ def shap_analysis(fitted_pipeline, X: pd.DataFrame, model_type="tree"):
         # restituisce (in ordine) oggetto shap che contiene logica del calcolo; matrice di numeri con 
         # stessa forma di X, dove ogni cella contiene valore shap per quel paziente e feature; dati pre
         # trasformati usati per il calcolo
+        
+def out_of_fold_shap(results: dict, X: pd.DataFrame, model_type: str):
+    """
+    Calcola SHAP "out-of-fold": ogni paziente viene spiegato usando il
+    modello del fold esterno in cui quel paziente era nel test set, quindi
+    MAI col modello che lo ha visto in training.
+
+    Perché conta: calcolare SHAP sul training set (come in un fit singolo)
+    è ottimistico, soprattutto per modelli ad albero che possono aver
+    "memorizzato" pattern specifici di quei pazienti. Questo approccio dà
+    un'importanza delle feature coerente con la logica della nested CV già
+    usata per le performance, invece di rompere quella logica solo per SHAP.
+
+    Richiede che results provenga da nested_cv_evaluate (contiene
+    fitted_models e test_indices per ciascun fold esterno).
+
+    Ritorna
+    -------
+    shap_df : DataFrame (pazienti x feature) con un valore SHAP per cella,
+              allineato all'indice originale di X.
+    mean_abs_shap : Series ordinata, importanza media |SHAP| per feature.
+    """
+    n_samples, n_features = X.shape
+    shap_matrix = np.full((n_samples, n_features), np.nan)
+    all_indices = np.arange(n_samples)
+
+    for fold_model, test_idx in zip(results["fitted_models"], results["test_indices"]):
+        train_idx = np.setdiff1d(all_indices, test_idx)
+        X_train_fold = X.iloc[train_idx]
+        X_test_fold = X.iloc[test_idx]
+
+        _, shap_values, _ = shap_analysis(
+            fold_model, X_test_fold, model_type=model_type, background_data=X_train_fold
+        )
+        sv = shap_values[1] if isinstance(shap_values, list) else shap_values
+        shap_matrix[test_idx, :] = sv
+
+    if np.isnan(shap_matrix).any():
+        missing = X.index[np.isnan(shap_matrix).any(axis=1)].tolist()
+        raise RuntimeError(
+            f"Alcuni pazienti non sono coperti da nessun fold di test: {missing}. "
+            "Controlla che gli outer fold di nested_cv_evaluate coprano tutto il dataset."
+        )
+
+    shap_df = pd.DataFrame(shap_matrix, index=X.index, columns=X.columns)
+    mean_abs_shap = shap_df.abs().mean(axis=0).sort_values(ascending=False)
+
+    print(f"\n[out_of_fold_shap] SHAP calcolata out-of-fold per {n_samples} pazienti, "
+          f"{n_features} feature (model_type={model_type})")
+
+    return shap_df, mean_abs_shap
 
 # SHAP (SHapley Additive exPlanations), se modelli AI visti come scatole nere SHAP apre la scatola e dice 
 # esattamente ogni feature quanto conta nel risultato finale. valuta non solo la predizione finale del 
 # modello (corretta o no), ma anche il merito/contributo di ogni feature al risultato per ogni paziente. 
+
+# ---------------------------------------------------------------------------
+# PLOT SHAP — salvati su file per essere ispezionati/riusati (es. nello studio di rete)
+# ---------------------------------------------------------------------------
+def plot_shap_bar(mean_abs_shap: pd.Series, output_path, top_n: int = 20):
+    """Bar chart delle top_n feature per importanza media |SHAP|."""
+    top = mean_abs_shap.head(top_n).sort_values()
+    plt.figure(figsize=(8, 0.35 * len(top) + 1))
+    plt.barh(top.index, top.values, color="#4C72B0")
+    plt.xlabel("mean |SHAP value|")
+    plt.title(f"Top {len(top)} feature per importanza SHAP")
+    plt.tight_layout()
+    plt.savefig(output_path, dpi=150, bbox_inches="tight")
+    plt.close()
+    print(f"[plot_shap_bar] salvato in {output_path}")
+
+
+def plot_shap_summary(shap_df: pd.DataFrame, X: pd.DataFrame, output_path, max_display: int = 20):
+    """
+    Beeswarm plot: mostra per le feature più importanti sia la magnitudine
+    dell'effetto SHAP sia la direzione (valore alto/basso della feature ->
+    spinge la predizione verso una classe o l'altra). Più informativo del
+    solo bar chart perché mostra anche il segno dell'effetto.
+    """
+    shap.summary_plot(shap_df.values, X, feature_names=X.columns,
+                       max_display=max_display, show=False)
+    plt.tight_layout()
+    plt.savefig(output_path, dpi=150, bbox_inches="tight")
+    plt.close()
+    print(f"[plot_shap_summary] salvato in {output_path}")
+
+
+def plot_shap_dependence(shap_df: pd.DataFrame, X: pd.DataFrame, feature: str, output_path):
+    """
+    Dependence plot per una singola feature: relazione tra il suo valore e
+    il suo effetto SHAP sulla predizione, colorato per interazione con la
+    feature più correlata. Utile per capire se l'effetto è lineare, a
+    soglia, o non monotono — informazione che il solo coefficiente
+    dell'Elastic Net non darebbe.
+    """
+    shap.dependence_plot(feature, shap_df.values, X, feature_names=X.columns, show=False)
+    plt.tight_layout()
+    plt.savefig(output_path, dpi=150, bbox_inches="tight")
+    plt.close()
+    print(f"[plot_shap_dependence] salvato in {output_path}")
+

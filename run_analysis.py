@@ -71,9 +71,16 @@ def main():
         params_df.to_csv(config.OUTPUT_DIR / f"{model_name}_best_params_per_fold.csv", index=False)
 
     # ------------------------------------------------------------------
-    # 4) Stability selection (bootstrap) su Elastic Net
+    # 4) Stability selection (bootstrap) su Elastic Net, con gli iperparametri
+    #    effettivamente scelti come migliori dalla nested CV (non arbitrari)
     # ------------------------------------------------------------------
-    stability_freq, stable_features = ml_pipeline.bootstrap_stability_selection(X_reduced, y)
+    en_best_params = ml_pipeline.majority_vote_params(all_results["elastic_net"]["best_params"])
+    
+    stability_freq, stable_features = ml_pipeline.bootstrap_stability_selection(
+        X_reduced, y,
+        C=en_best_params["clf__C"],
+        l1_ratio=en_best_params["clf__l1_ratio"],
+    )
     stability_freq.sort_values(ascending=False).to_csv(
         config.OUTPUT_DIR / "feature_stability_frequencies.csv",
         header=["selection_frequency"]
@@ -84,36 +91,47 @@ def main():
     )
 
     # ------------------------------------------------------------------
-    # 5) SHAP sul miglior modello ad albero (se presente e se shap è installato)
+    # 5) SHAP sul modello con AUC migliore, calcolata out-of-fold e corredata di plot
     # ------------------------------------------------------------------
-    if ml_pipeline.SHAP_AVAILABLE and "random_forest" in all_results:
-        # usa il modello del fold con AUC più alta come rappresentativo
-        rf_res = all_results["random_forest"]
-        best_fold = int(np.argmax(rf_res["auc"]))
-        best_rf_model = rf_res["fitted_models"][best_fold]
+    if ml_pipeline.SHAP_AVAILABLE:
+        best_model_name = summary.iloc[0]["model"]
+        model_type = ml_pipeline.MODEL_TYPE_MAP.get(best_model_name)
 
-        explainer, shap_values, X_transformed = ml_pipeline.shap_analysis(
-            best_rf_model, X_reduced, model_type="tree"
-        )
-        # Gestione compatibilità per le nuove versioni della libreria SHAP
-        if isinstance(shap_values, list):
-            sv = shap_values[1]
-        elif np.ndim(shap_values) == 3:
-            # Se è un array 3D (n_samples, n_features, n_classes), prendiamo la classe positiva 
-            # (indice 1)
-            sv = shap_values[:, :, 1]
+        if model_type is None:
+            print(f"\n[SHAP] modello migliore '{best_model_name}' non mappato in "
+                  f"MODEL_TYPE_MAP: skip analisi SHAP")
         else:
-            sv = shap_values
-        mean_abs_shap = pd.Series(
-            np.abs(sv).mean(axis=0), index=X_reduced.columns # val assoluto shap (entità impatto)
-                # media lungo i pazienti per ogni feature
-        ).sort_values(ascending=False)
-        mean_abs_shap.to_csv(
-            config.OUTPUT_DIR / "shap_feature_importance_random_forest.csv",
-            header=["mean_abs_shap"]
-        )
-        print("\n[SHAP] Top 15 feature per importanza media |SHAP| (Random Forest):")
-        print(mean_abs_shap.head(15))
+            print(f"\n[SHAP] modello migliore secondo AUC (nested CV): "
+                  f"{best_model_name} ({model_type})")
+
+            best_results = all_results[best_model_name]
+            shap_df, mean_abs_shap = ml_pipeline.out_of_fold_shap(
+                best_results, X_reduced, model_type
+            )
+
+            # matrice completa pazienti x feature: riusabile anche come input
+            # per lo studio di rete (es. correlazioni tra profili di importanza SHAP)
+            shap_df.to_csv(config.OUTPUT_DIR / f"shap_values_{best_model_name}_out_of_fold.csv")
+            mean_abs_shap.to_csv(
+                config.OUTPUT_DIR / f"shap_feature_importance_{best_model_name}.csv",
+                header=["mean_abs_shap"]
+            )
+
+            ml_pipeline.plot_shap_bar(
+                mean_abs_shap, config.OUTPUT_DIR / f"shap_bar_{best_model_name}.png"
+            )
+            ml_pipeline.plot_shap_summary(
+                shap_df, X_reduced, config.OUTPUT_DIR / f"shap_summary_{best_model_name}.png"
+            )
+            for feat in mean_abs_shap.head(3).index:
+                safe_name = feat.replace("/", "_").replace(" ", "_")
+                ml_pipeline.plot_shap_dependence(
+                    shap_df, X_reduced, feat,
+                    config.OUTPUT_DIR / f"shap_dependence_{safe_name}.png"
+                )
+
+            print("\n[SHAP] Top 15 feature per importanza media |SHAP| (out-of-fold):")
+            print(mean_abs_shap.head(15))
 
     # ------------------------------------------------------------------
     # 6) Salva anche un JSON compatto con la configurazione usata (riproducibilità)
