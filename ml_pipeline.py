@@ -16,6 +16,7 @@ import pandas as pd
 import matplotlib
 matplotlib.use("Agg")  # backend non interattivo, necessario per salvare plot da script
 import matplotlib.pyplot as plt
+from collections import Counter
 from sklearn.model_selection import StratifiedKFold, GridSearchCV
 from sklearn.preprocessing import StandardScaler
 from sklearn.linear_model import LogisticRegression
@@ -176,7 +177,12 @@ def majority_vote_params(best_params_list):
     print(f"[majority_vote_params] combinazione più frequente: {dict(most_common)} "
           f"(scelta in {count}/{len(best_params_list)} fold)")
     return dict(most_common)
-
+        # ogni nested cv testa gli iperparam, ma la cv esterna produce diversi possibili valori degli 
+        # iperparam (uno per ogni fold). trasforma queste coppie iperparam-valore in tupla. poi viene
+        # contato quante volte, sul numero di fold, questi iperparam sono scelti. prendo il più frequente 
+        # e lo trasformo in dictionary di nuovo. voto di maggioranza per evitare fluttuazioni del valore
+        # per scelta di fold diversi
+        
 # ---------------------------------------------------------------------------
 # NESTED CROSS VALIDATION
 # ---------------------------------------------------------------------------
@@ -399,8 +405,11 @@ def out_of_fold_shap(results: dict, X: pd.DataFrame, model_type: str):
     shap_matrix = np.full((n_samples, n_features), np.nan)
     all_indices = np.arange(n_samples)
 
-    for fold_model, test_idx in zip(results["fitted_models"], results["test_indices"]):
-        train_idx = np.setdiff1d(all_indices, test_idx)
+    for fold_model, test_idx in zip(results["fitted_models"], results["test_indices"]): # zip() function
+            # is used to combine two or more iterables into a single iterator of tuples.
+        train_idx = np.setdiff1d(all_indices, test_idx) #  finds the set difference of two arrays. It 
+            # returns a sorted, 1D array of unique values in the first input array that are not present
+            # in the second input array.
         X_train_fold = X.iloc[train_idx]
         X_test_fold = X.iloc[test_idx]
 
