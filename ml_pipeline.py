@@ -364,14 +364,18 @@ def shap_analysis(fitted_pipeline, X: pd.DataFrame, model_type="tree", backgroun
     # applica le trasformazioni precedenti (es. scaler) prima di passare a SHAP
     X_transformed = _transform_with_pipeline_steps(fitted_pipeline, X)
 
-    if model_type == "tree":
+    if model_type == "tree": # non serve passargli il bg data, il modello di tree sa già che a un certo
+            # nodo c'è una proporzione di dati che vanno divisi a dx o a sx. quindi il valore medio è 
+            # %dx * output medio dx + $sx * output medio sx, questa viene confrontata con output con 
+            # feature
         explainer = shap.TreeExplainer(clf) # algoritmi ottimizzati a seconda del modello
-        shap_values = explainer.shap_values(X_transformed)
+        shap_values = explainer.shap_values(X_transformed) 
     elif model_type == "linear":
         bg = background_data if background_data is not None else X
         bg_transformed = _transform_with_pipeline_steps(fitted_pipeline, bg)
-        explainer = shap.LinearExplainer(clf, bg_transformed)
-        shap_values = explainer.shap_values(X_transformed)
+        explainer = shap.LinearExplainer(clf, bg_transformed) # preparati a spiegare il modello
+        shap_values = explainer.shap_values(X_transformed) # spiega il modello, considerando il paziente
+            # che ti viene passato 
     else:
         raise ValueError("model_type deve essere 'tree' o 'linear'")
 
@@ -415,7 +419,12 @@ def out_of_fold_shap(results: dict, X: pd.DataFrame, model_type: str):
 
         _, shap_values, _ = shap_analysis(
             fold_model, X_test_fold, model_type=model_type, background_data=X_train_fold
-        )
+        ) # gli passo il modello allenato su 4 fold su 5, e come dataset il 5 fold non visto dal modello.
+            # quindi sto valutando la shap sul fold che vede il paziente come test e non come train.
+            # background data è usato per calcolare l'effetto della particolare feature. io non posso 
+            # semplicemente eliminarla dal modello, il modello non lo accetta, quindi la sostituisco con
+            # tutti i valori che assume nel training, ne faccio media e confronto l'effetto tra feature
+            # vera del paziente e quella ottenuta dal dataset completo
         sv = shap_values[1] if isinstance(shap_values, list) else shap_values
         shap_matrix[test_idx, :] = sv
 
@@ -439,7 +448,7 @@ def out_of_fold_shap(results: dict, X: pd.DataFrame, model_type: str):
 # modello (corretta o no), ma anche il merito/contributo di ogni feature al risultato per ogni paziente. 
 
 # ---------------------------------------------------------------------------
-# PLOT SHAP — salvati su file per essere ispezionati/riusati (es. nello studio di rete)
+# PLOT SHAP — salvati su file per essere ispezionati/riusati 
 # ---------------------------------------------------------------------------
 def plot_shap_bar(mean_abs_shap: pd.Series, output_path, top_n: int = 20):
     """Bar chart delle top_n feature per importanza media |SHAP|."""
