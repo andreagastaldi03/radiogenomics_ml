@@ -8,13 +8,6 @@ from pathlib import Path
 # ---------------------------------------------------------------------------
 # PERCORSI
 # ---------------------------------------------------------------------------
-# Il dataset atteso è un CSV con:
-#   - una colonna "patient_id"
-#   - una colonna "label" (es. "ADK" / "SCC")
-#   - tutte le altre colonne = feature radiomiche (107) + feature genomiche (750)
-# Se hai già due file separati (radiomica / genomica), impostali qui e uniscili
-# in data_utils.load_data(). Il codice è già predisposto per entrambi i casi.
-
 DATA_DIR = Path("/content/drive/MyDrive/problem_solving/project/")
 OUTPUT_DIR = Path("/content/drive/MyDrive/problem_solving/project/outputs")
 

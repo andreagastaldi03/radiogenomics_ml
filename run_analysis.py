@@ -99,12 +99,14 @@ def main():
         if isinstance(shap_values, list):
             sv = shap_values[1]
         elif np.ndim(shap_values) == 3:
-            # Se è un array 3D (n_samples, n_features, n_classes), prendiamo la classe positiva (indice 1)
+            # Se è un array 3D (n_samples, n_features, n_classes), prendiamo la classe positiva 
+            # (indice 1)
             sv = shap_values[:, :, 1]
         else:
             sv = shap_values
         mean_abs_shap = pd.Series(
-            np.abs(sv).mean(axis=0), index=X_reduced.columns
+            np.abs(sv).mean(axis=0), index=X_reduced.columns # val assoluto shap (entità impatto)
+                # media lungo i pazienti per ogni feature
         ).sort_values(ascending=False)
         mean_abs_shap.to_csv(
             config.OUTPUT_DIR / "shap_feature_importance_random_forest.csv",
