@@ -105,7 +105,7 @@ def get_model_grid():
         ("clf", SVC(kernel="linear", probability=True, random_state=config.RANDOM_STATE)),
     ])
     svm_grid = {
-        "clf__C": [0.01, 0.1, 1, 10],
+        "clf__C": [0.001, 0.01, 0.1, 1, 10],
     }
     models["svm_linear"] = (svm_pipe, svm_grid)
 
@@ -174,7 +174,7 @@ def majority_vote_params(best_params_list):
     """
     param_tuples = [tuple(sorted(p.items())) for p in best_params_list]
     most_common, count = Counter(param_tuples).most_common(1)[0]
-    print(f"[majority_vote_params] combinazione più frequente: {dict(most_common)} "
+    print(f"\n[majority_vote_params] combinazione più frequente: {dict(most_common)} "
           f"(scelta in {count}/{len(best_params_list)} fold)")
     return dict(most_common)
         # ogni nested cv testa gli iperparam, ma la cv esterna produce diversi possibili valori degli 
