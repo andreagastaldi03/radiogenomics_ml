@@ -46,6 +46,7 @@ def main():
     # 1) Caricamento dati
     # ------------------------------------------------------------------
     X, y = data_utils.load_data(source=config.DATA_SOURCE)
+    X.to_csv(config.OUTPUT_DIR / "X_features.csv")
 
     # ------------------------------------------------------------------
     # 2) Riduzione feature neutra (NON guarda la label)
