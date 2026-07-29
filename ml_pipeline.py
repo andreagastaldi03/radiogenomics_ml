@@ -450,17 +450,30 @@ def out_of_fold_shap(results: dict, X: pd.DataFrame, model_type: str):
 # ---------------------------------------------------------------------------
 # PLOT SHAP — salvati su file per essere ispezionati/riusati 
 # ---------------------------------------------------------------------------
-def plot_shap_bar(mean_abs_shap: pd.Series, output_path, top_n: int = 20):
-    """Bar chart delle top_n feature per importanza media |SHAP|."""
-    top = mean_abs_shap.head(top_n).sort_values()
+def plot_shap_bar(mean_abs_shap: pd.Series, output_path: str, top_n: int = 20):
+    """
+    Bar chart delle top_n feature per importanza percentuale relativa SHAP.
+    Mostra quanto ciascuna feature contribuisce in percentuale all'impatto totale.
+    """
+    # 1. Calcolo la percentuale sul totale di tutti i valori SHAP
+    shap_percentage = (mean_abs_shap / mean_abs_shap.sum()) * 100
+    
+    # 2. Seleziono le top_n e le ordino in modo crescente (necessario per plt.barh)
+    top = shap_percentage.head(top_n).sort_values()
+    
+    # 3. Creazione del grafico
     plt.figure(figsize=(8, 0.35 * len(top) + 1))
     plt.barh(top.index, top.values, color="#4C72B0")
-    plt.xlabel("mean |SHAP value|")
-    plt.title(f"Top {len(top)} feature per importanza SHAP")
+    
+    # 4. Aggiornamento etichette
+    plt.xlabel("Impatto Relativo SHAP (%)")
+    plt.title(f"Top {len(top)} feature per importanza SHAP (%)")
+    
     plt.tight_layout()
     plt.savefig(output_path, dpi=150, bbox_inches="tight")
     plt.close()
-    print(f"[plot_shap_bar] salvato in {output_path}")
+    
+    print(f"[plot_shap_bar] salvato in {output_path} (valori in percentuale)")
 
 
 def plot_shap_summary(shap_df: pd.DataFrame, X: pd.DataFrame, output_path, max_display: int = 20):
