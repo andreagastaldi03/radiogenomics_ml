@@ -25,10 +25,8 @@ def normalize_id(patient_id):
         return None
     patient_str = str(patient_id) # converte qualsiasi tipo di dato in stringa
     match = re.search(r'\d+', patient_str) # usa Regular Expression, search scorre la stringa 
-                                           # da sx a dx e cattura il primo blocco di numeri, 
-                                           # dettato da "\d" che significa "cerca qualsiasi 
-                                           # cifra da 0 a 9", e "+" significa "prendi anche 
-                                           # tutte quelle consecutive"
+        # da sx a dx e cattura il primo blocco di numeri, dettato da "\d" che significa "cerca 
+        # qualsiasi cifra da 0 a 9", e "+" significa "prendi anche tutte quelle consecutive"
     return match.group(0) if match else patient_str.strip()
     # match.group(0) ritorna la completa frase che ha matchato la ricerca
     # .strips() rimuove spazi bianchi e gap nel testo, restituendo una stringa più pulita possibile
@@ -114,6 +112,44 @@ def load_data(source: str = "both"):
 
     return X, y
 
+def load_batch_column(patient_index, batch_col: str = None):
+    """
+    Carica (se disponibile) una colonna di "batch" tecnico dal file dei
+    metadati (Tabella_di_conversione_completa.xlsx), allineata all'indice
+    paziente già usato per X e y.
+
+    un "batch" è un lotto tecnico — per esempio la data di estrazione dell'RNA, 
+    la piastra usata, il run di sequenziamento. Se nei tuoi metadati esiste una 
+    colonna così (imposta in config.BATCH_COL), questa funzione te la restituisce 
+    pronta per essere usata nel controllo di batch effect (diagnostics.batch_effect_diagnostic).
+
+    Ritorna None se batch_col non è impostato o la colonna non esiste,
+    così il resto del codice può continuare a funzionare senza errori anche
+    senza questa informazione.
+    """
+    batch_col = batch_col or config.BATCH_COL
+    if not batch_col:
+        print("[load_batch_column] Nessuna colonna di batch configurata "
+              "(config.BATCH_COL è None): controllo di batch effect limitato "
+              "alla sola visualizzazione per fenotipo.")
+        return None
+
+    labels_raw = pd.read_excel(config.LABELS_PATH, index_col=0).T
+    labels_raw.columns = labels_raw.columns.str.strip()
+
+    if batch_col not in labels_raw.columns:
+        print(f"[load_batch_column] ATTENZIONE: colonna '{batch_col}' non trovata "
+              f"in {config.LABELS_PATH}. Colonne disponibili: {list(labels_raw.columns)}")
+        return None
+
+    labels_raw['ID_Normalizzato'] = labels_raw[config.ID_COL].apply(normalize_id)
+    batch = labels_raw.set_index('ID_Normalizzato')[batch_col].astype(str).str.strip()
+    batch = batch.reindex(patient_index)
+
+    print(f"[load_batch_column] batch '{batch_col}' caricato per {batch.notna().sum()} "
+          f"pazienti su {len(patient_index)}. Valori distinti: {batch.value_counts().to_dict()}")
+    return batch
+
 # ---------------------------------------------------------------------------
 # FILTRO PER VARIANZA
 # ---------------------------------------------------------------------------
@@ -198,17 +234,112 @@ def redundancy_reduction(
 # a quel gruppo.
 
 # ---------------------------------------------------------------------------
+# SELEZIONE GENI ALTERNATIVA (IQR) — studio statistico pregresso
+# ---------------------------------------------------------------------------
+def select_genes(X_genes: pd.DataFrame, method: str = None) -> pd.DataFrame:
+    """
+    sceglie quali geni tenere. Il metodo "variance" (di default) butta via i 
+    geni troppo "piatti" (che non cambiano quasi mai tra pazienti). I metodi 
+    "iqr_*" invece guardano quanto un gene varia tra il paziente al 25° e al 
+    75° percentile (IQR) e tengono solo i più variabili — è il criterio usato 
+    nello studio statistico pregresso (PDF), più robusto ai valori estremi 
+    rispetto alla semplice varianza.
+
+    method: "variance" (default da config), "iqr_top_n", "iqr_top_pct",
+    "iqr_threshold". Parametri specifici presi da config.GENE_IQR_*.
+    """
+    method = method or config.GENE_SELECTION_METHOD
+
+    if method == "variance":
+        return variance_filter(X_genes)
+
+    iqr = X_genes.quantile(0.75) - X_genes.quantile(0.25)
+
+    if method == "iqr_top_n":
+        n = config.GENE_IQR_TOP_N
+        keep = iqr.sort_values(ascending=False).head(n).index
+    elif method == "iqr_top_pct":
+        n = max(1, int(len(iqr) * config.GENE_IQR_TOP_PCT))
+        keep = iqr.sort_values(ascending=False).head(n).index
+    elif method == "iqr_threshold":
+        keep = iqr[iqr > config.GENE_IQR_THRESHOLD].index
+    else:
+        raise ValueError(
+            f"[select_genes] metodo '{method}' non valido. Usa 'variance', "
+            f"'iqr_top_n', 'iqr_top_pct' o 'iqr_threshold'."
+        )
+
+    print(f"[select_genes] metodo={method}: {X_genes.shape[1]} -> {len(keep)} geni")
+    return X_genes[keep]
+
+
+def is_shape_column(colname: str) -> bool:
+    """
+    dice se una colonna radiomica descrive la "forma" del tumore 
+    (volume, diametri, sfericità...) invece della texture
+    (quanto è disomogenea l'immagine). Riconosce il pattern usato da
+    pyradiomics: nome contenente "shape".
+    """
+    return "shape" in colname.lower()
+
+# ---------------------------------------------------------------------------
 # PIPELINE COMPLETA DI RIDUZIONE NEUTRA
 # ---------------------------------------------------------------------------
-def neutral_feature_reduction(X: pd.DataFrame) -> pd.DataFrame:
+def neutral_feature_reduction(X: pd.DataFrame,
+                               gene_selection_method: str = None,
+                               exclude_shape: bool = None) -> pd.DataFrame:
     """
-    Applica in sequenza variance filter + redundancy reduction.
-    Da usare SEMPRE prima di qualsiasi step supervisionato, e da riusare
-    identica nello studio di rete per garantire coerenza tra i due task.
+    riduce il numero di colonne prima di qualsiasi modello, senza mai guardare 
+    l'etichetta ADK/SCC. Ora radiomica e genomica vengono ridotte SEPARATAMENTE 
+    (come nello studio statistico pregresso) invece che tutte insieme in un'unica
+    matrice di correlazione mista — questo evita che pochi geni molto
+    correlati "nascondano" la vera struttura di ridondanza radiomica (e
+    viceversa), ed è coerente con la metodologia già validata nel PDF.
+
+    Se exclude_shape=True (default da config), le feature radiomiche "di
+    forma" vengono ridotte per conto proprio, separate dalle feature di
+    texture/intensità, esattamente come nello studio statistico pregresso.
+
+    gene_selection_method: sovrascrive config.GENE_SELECTION_METHOD se
+    vuoi provare un criterio diverso senza modificare config.py.
     """
-    X_var = variance_filter(X)
-    X_red = redundancy_reduction(X_var)
-    return X_red
+    gene_selection_method = gene_selection_method or config.GENE_SELECTION_METHOD
+    exclude_shape = config.EXCLUDE_SHAPE_FROM_MAIN_REDUCTION if exclude_shape is None else exclude_shape
+
+    rad_cols = [c for c in X.columns if c.startswith("rad__")]
+    gen_cols = [c for c in X.columns if c.startswith("gen__")]
+    pieces = []
+
+    # --- Blocco radiomico ---
+    if rad_cols:
+        if exclude_shape:
+            shape_cols = [c for c in rad_cols if is_shape_column(c)]
+            nonshape_cols = [c for c in rad_cols if c not in shape_cols]
+            print(f"[neutral_feature_reduction] radiomica: {len(nonshape_cols)} "
+                  f"feature di texture/intensità, {len(shape_cols)} feature di forma "
+                  f"(ridotte separatamente)")
+
+            if nonshape_cols:
+                X_nonshape_reduced = redundancy_reduction(variance_filter(X[nonshape_cols]))
+                pieces.append(X_nonshape_reduced)
+            if shape_cols:
+                X_shape_reduced = redundancy_reduction(variance_filter(X[shape_cols]))
+                pieces.append(X_shape_reduced)
+        else:
+            pieces.append(redundancy_reduction(variance_filter(X[rad_cols])))
+
+    # --- Blocco genomico ---
+    if gen_cols:
+        X_gen_selected = select_genes(X[gen_cols], method=gene_selection_method)
+        X_gen_reduced = redundancy_reduction(X_gen_selected)
+        pieces.append(X_gen_reduced)
+
+    if not pieces:
+        raise ValueError("[neutral_feature_reduction] Nessuna colonna rad__ o gen__ trovata in X.")
+
+    X_reduced = pd.concat(pieces, axis=1)
+    print(f"[neutral_feature_reduction] TOTALE: {X.shape[1]} -> {X_reduced.shape[1]} feature")
+    return X_reduced
 
 
 if __name__ == "__main__":
