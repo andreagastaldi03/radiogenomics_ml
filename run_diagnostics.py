@@ -28,7 +28,7 @@ import diagnostics
 # <nome_modello>_best_params_per_fold.csv). Questo esempio usa elastic_net;
 # se il tuo modello migliore è random_forest o svm_linear, sostituisci la
 # pipeline sotto con quella corrispondente.
-BEST_MODEL_PARAMS = {"C": 0.01, "l1_ratio": 0.05}  # <-- sostituisci con i tuoi valori reali
+BEST_MODEL_PARAMS = {"C": 0.01, "l1_ratio": 0.1}  # <-- sostituisci con i tuoi valori reali
 
 
 def build_best_pipeline():
