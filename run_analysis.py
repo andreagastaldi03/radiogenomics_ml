@@ -141,7 +141,7 @@ def main():
             # Calcola la percentuale di contributo di ogni feature sul totale
             shap_percentage = (mean_abs_shap / mean_abs_shap.sum()) * 100
 
-            print("\n[SHAP] Top 5 feature in percentuale di impatto:")
+            print("\n[SHAP] Top 15 feature in percentuale di impatto:")
             print(shap_percentage.head(15).round(2).astype(str) + "%")
 
     # ------------------------------------------------------------------
