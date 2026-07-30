@@ -80,7 +80,7 @@ BATCH_COL = None
 # "iqr_top_n"      -> tiene i GENE_IQR_TOP_N geni con IQR più alta
 # "iqr_top_pct"    -> tiene la percentuale GENE_IQR_TOP_PCT di geni più variabili
 # "iqr_threshold"  -> tiene i geni con IQR sopra GENE_IQR_THRESHOLD
-GENE_SELECTION_METHOD = "variance"
+GENE_SELECTION_METHOD = "iqr_top_n"
 GENE_IQR_TOP_N = 50
 GENE_IQR_TOP_PCT = 0.05
 GENE_IQR_THRESHOLD = 1000
