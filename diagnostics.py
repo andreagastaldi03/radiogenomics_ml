@@ -210,18 +210,13 @@ def batch_effect_diagnostic(X: pd.DataFrame, y: pd.Series, batch: pd.Series = No
             if kw_p < 0.05:
                 print("[batch_effect_diagnostic] ATTENZIONE: il batch spiega in modo "
                       "statisticamente significativo la posizione dei pazienti sulla "
-                      "prima componente principale. Possibile batch effect: indaga "
-                      "da dove viene questa differenza tecnica prima di fidarti dei "
-                      "risultati del modello.")
+                      "prima componente principale. Possibile batch effect.")
             else:
                 print("[batch_effect_diagnostic] Nessuna evidenza forte di batch effect "
                       "su PC1 con questo test.")
     else:
         print("[batch_effect_diagnostic] Nessuna variabile di batch fornita: "
-              "controlla solo visivamente il pannello per fenotipo. Se non hai "
-              "informazioni sul lotto tecnico dei tuoi campioni, ti conviene "
-              "chiedere al laboratorio se i pazienti ADK e SCC sono stati "
-              "processati in date/run diversi.")
+              "controlla solo visivamente il pannello per fenotipo.")
 
     plt.tight_layout()
     if output_path:

@@ -61,10 +61,19 @@ def main():
 
     summary = summarize_results(all_results)
     summary.to_csv(config.OUTPUT_DIR / "model_comparison_summary.csv", index=False)
+    pooled_summary = run_pooled_oof_analysis(all_results, X_reduced, y)
+
     print("\n" + "=" * 70)
     print("RIEPILOGO CONFRONTO MODELLI (nested CV)")
     print("=" * 70)
     print(summary.to_string(index=False))
+    
+    
+    print("\n" + "=" * 70)
+    print("CONFRONTO AUC: MEDIA DEI FOLD vs POOLED OOF")
+    print("=" * 70)
+
+    print(pooled_summary.to_string(index=False))
 
     # salva i best_params per fold di ogni modello (utile per capire la stabilità del tuning)
     for model_name, res in all_results.items():

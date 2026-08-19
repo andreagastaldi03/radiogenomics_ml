@@ -266,6 +266,189 @@ def run_all_models(X: pd.DataFrame, y: pd.Series):
         all_results[name] = nested_cv_evaluate(X, y, name, pipe, grid)
     return all_results
 
+# ---------------------------------------------------------------------------
+# POOLED OUT-OF-FOLD AUC
+# ---------------------------------------------------------------------------
+def compute_pooled_oof_auc(results: dict, X: pd.DataFrame, y: pd.Series):
+    """
+    Calcola la pooled out-of-fold ROC-AUC usando le stesse predizioni 
+    della nested CV esterna.
+
+    Non rifitta i modelli e non modifica gli split della CV.
+
+    Per ogni outer fold:
+        - prende il modello già addestrato
+        - prende i pazienti presenti nel test fold
+        - calcola la probabilità predetta per quei pazienti
+
+    Le predizioni dei diversi fold vengono poi ricomposte nell'ordine originale 
+    dei pazienti e viene calcolata una singola ROC-AUC sull'intero insieme 
+    delle predizioni out-of-fold.
+
+    Returns
+    -------
+    pooled_auc : float
+        ROC-AUC calcolata sulle predizioni OOF di tutti i pazienti.
+
+    oof_df : pd.DataFrame
+        Tabella con una riga per paziente contenente:
+        - patient
+        - y_true
+        - oof_probability
+        - outer_test_fold
+    """
+
+    # Conversione della classe positiva in 0/1.
+    # Questo mantiene la stessa convenzione usata dalla pipeline.
+    y_bin = (y == config.POSITIVE_CLASS).astype(int)
+
+    n_samples = len(X)
+
+    # Array vuoto in cui ricostruiremo le predizioni OOF.
+    # La posizione corrisponde alla posizione originale del paziente in X.
+    oof_probability = np.full(n_samples, np.nan, dtype=float)
+
+    # Salviamo anche a quale outer fold apparteneva ciascun paziente.
+    oof_fold = np.full(n_samples, -1, dtype=int)
+
+    # --------------------------------------------------------------
+    # Recuperiamo le predizioni dai modelli già addestrati
+    # --------------------------------------------------------------
+
+    for fold_i, (fold_model, test_idx) in enumerate(
+        zip(
+            results["fitted_models"],
+            results["test_indices"]
+        ),
+        start=1
+    ):
+
+        test_idx = np.asarray(test_idx, dtype=int)
+
+        # Pazienti che questo fold aveva tenuto fuori dal training
+        X_test = X.iloc[test_idx]
+
+        # Predizione out-of-fold.
+        # Il modello è già stato addestrato sul training fold.
+        y_proba = fold_model.predict_proba(X_test)[:, 1]
+
+        # ----------------------------------------------------------
+        # Controllo: nessun paziente deve comparire in più di un
+        # test fold.
+        # ----------------------------------------------------------
+
+        if np.any(~np.isnan(oof_probability[test_idx])):
+            raise RuntimeError(
+                f"Alcuni pazienti sono presenti in più di un test fold "
+                f"(fold {fold_i})."
+            )
+
+        # Salviamo la predizione nella posizione originale del paziente.
+        oof_probability[test_idx] = y_proba
+
+        # Salviamo anche il fold di appartenenza.
+        oof_fold[test_idx] = fold_i
+
+    # --------------------------------------------------------------
+    # Controllo finale:
+    # ogni paziente deve avere esattamente una predizione OOF
+    # --------------------------------------------------------------
+
+    missing_mask = np.isnan(oof_probability)
+
+    if missing_mask.any():
+
+        missing_patients = X.index[missing_mask].tolist()
+
+        raise RuntimeError(
+            "Mancano predizioni out-of-fold per alcuni pazienti: "
+            f"{missing_patients}"
+        )
+
+    # --------------------------------------------------------------
+    # POOLED OOF AUC
+    # --------------------------------------------------------------
+
+    pooled_auc = roc_auc_score(
+        y_bin,
+        oof_probability
+    )
+
+    # --------------------------------------------------------------
+    # Tabella diagnostica paziente-per-paziente
+    # --------------------------------------------------------------
+
+    oof_df = pd.DataFrame({
+        "patient": X.index,
+        "y_true": y_bin.to_numpy(),
+        "oof_probability": oof_probability,
+        "outer_test_fold": oof_fold,
+    })
+
+    return pooled_auc, oof_df
+
+def run_pooled_oof_analysis(all_results: dict, X: pd.DataFrame, y: pd.Series):
+    """
+    Calcola la pooled OOF AUC per tutti i modelli.
+
+    Salva:
+        - una tabella di predizioni OOF per ogni modello
+        - una tabella riassuntiva con confronto tra
+          mean fold AUC e pooled OOF AUC
+    """
+
+    rows = []
+
+    print("\n" + "=" * 70)
+    print("POOLED OUT-OF-FOLD AUC")
+    print("=" * 70)
+
+    for model_name, res in all_results.items():
+
+        pooled_auc, oof_df = compute_pooled_oof_auc(res, X, y)
+
+        # ----------------------------------------------------------
+        # Salviamo le predizioni paziente-per-paziente
+        # ----------------------------------------------------------
+
+        oof_df.to_csv(
+            config.OUTPUT_DIR / f"{model_name}_oof_predictions.csv",
+            index=False
+        )
+
+        # ----------------------------------------------------------
+        # Salviamo sia la media delle AUC dei fold sia la pooled AUC
+        # ----------------------------------------------------------
+
+        rows.append({
+            "model": model_name,
+            "auc_mean_fold": np.mean(res["auc"]),
+            "auc_sd_fold": np.std(res["auc"]),
+            "pooled_oof_auc": pooled_auc,
+        })
+
+        print(
+            f"{model_name}: "
+            f"fold mean = {np.mean(res['auc']):.3f} ± "
+            f"{np.std(res['auc']):.3f} | "
+            f"pooled OOF = {pooled_auc:.3f}"
+        )
+
+    # --------------------------------------------------------------
+    # Tabella finale
+    # --------------------------------------------------------------
+
+    pooled_summary = (
+        pd.DataFrame(rows).sort_values("pooled_oof_auc", ascending=False)
+        .reset_index(drop=True)
+    )
+
+    pooled_summary.to_csv(
+        config.OUTPUT_DIR / "pooled_oof_model_comparison.csv",
+        index=False
+    )
+
+    return pooled_summary
 
 # ---------------------------------------------------------------------------
 # STABILITY SELECTION (bootstrap) — quali feature emergono ripetutamente
