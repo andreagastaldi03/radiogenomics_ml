@@ -70,8 +70,14 @@ def main():
     
     
     print("\n" + "=" * 70)
-    print("CONFRONTO AUC: MEDIA DEI FOLD vs POOLED OOF")
+    print("CONFRONTO FOLD-LEVEL vs POOLED OOF")
     print("=" * 70)
+
+    print(
+        pooled_summary.to_string(
+            index=False
+        )
+    )
 
     print(pooled_summary.to_string(index=False))
 
