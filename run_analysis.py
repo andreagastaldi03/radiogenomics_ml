@@ -61,7 +61,7 @@ def main():
 
     summary = summarize_results(all_results)
     summary.to_csv(config.OUTPUT_DIR / "model_comparison_summary.csv", index=False)
-    pooled_summary = run_pooled_oof_analysis(all_results, X_reduced, y)
+    pooled_summary = ml_pipeline.run_pooled_oof_analysis(all_results, X_reduced, y)
 
     print("\n" + "=" * 70)
     print("RIEPILOGO CONFRONTO MODELLI (nested CV)")
