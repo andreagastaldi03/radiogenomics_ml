@@ -22,6 +22,7 @@ from sklearn.preprocessing import StandardScaler
 from sklearn.linear_model import LogisticRegression
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.svm import SVC
+from sklearn.base import clone
 from sklearn.pipeline import Pipeline
 from sklearn.metrics import (
     roc_auc_score, balanced_accuracy_score, f1_score,
@@ -183,6 +184,22 @@ def majority_vote_params(best_params_list):
         # e lo trasformo in dictionary di nuovo. voto di maggioranza per evitare fluttuazioni del valore
         # per scelta di fold diversi
         
+        
+def build_pipeline_from_best_params(model_name: str, best_params: dict):
+    """
+    Ricostruisce (non fittata) la pipeline di un modello con un set di
+    iperparametri fissato, qualunque sia il tipo di modello — usata per
+    rieseguire lo stesso modello "migliore" fuori dalla nested CV (test di
+    permutazione, batch effect), senza doverlo hardcodare a elastic_net.
+    """
+    models = get_model_grid()
+    if model_name not in models:
+        raise ValueError(f"Modello '{model_name}' non trovato. Disponibili: {list(models.keys())}")
+    pipe, _ = models[model_name]
+    pipe = clone(pipe)
+    pipe.set_params(**best_params)
+    return pipe
+
 # ---------------------------------------------------------------------------
 # NESTED CROSS VALIDATION
 # ---------------------------------------------------------------------------
@@ -358,9 +375,7 @@ def compute_pooled_oof_metrics(results: dict, X: pd.DataFrame, y: pd.Series):
         # ----------------------------------------------------------
 
         oof_probability[test_idx] = y_proba
-
         oof_prediction[test_idx] = y_pred_bin
-
         oof_fold[test_idx] = fold_i
 
     # --------------------------------------------------------------
@@ -387,9 +402,7 @@ def compute_pooled_oof_metrics(results: dict, X: pd.DataFrame, y: pd.Series):
     # --------------------------------------------------------------
 
     pooled_auc = roc_auc_score(y_bin, oof_probability)
-
     pooled_balanced_accuracy = (balanced_accuracy_score(y_bin, oof_prediction))
-
     pooled_f1 = f1_score(y_bin, oof_prediction, zero_division=0)
 
     # --------------------------------------------------------------
@@ -430,7 +443,6 @@ def run_pooled_oof_analysis(all_results: dict, X: pd.DataFrame, y: pd.Series):
     print("=" * 70)
 
     for model_name, res in all_results.items():
-
         metrics, oof_df = compute_pooled_oof_metrics(res, X, y)
 
         # ----------------------------------------------------------
@@ -448,15 +460,10 @@ def run_pooled_oof_analysis(all_results: dict, X: pd.DataFrame, y: pd.Series):
         # ----------------------------------------------------------
 
         auc_mean = np.mean(res["auc"])
-
         auc_sd = np.std(res["auc"])
-
         balacc_mean = np.mean(res["balanced_accuracy"])
-
         balacc_sd = np.std(res["balanced_accuracy"])
-
         f1_mean = np.mean(res["f1"])
-
         f1_sd = np.std(res["f1"])
 
         # ----------------------------------------------------------
@@ -685,7 +692,11 @@ def out_of_fold_shap(results: dict, X: pd.DataFrame, model_type: str):
             # semplicemente eliminarla dal modello, il modello non lo accetta, quindi la sostituisco con
             # tutti i valori che assume nel training, ne faccio media e confronto l'effetto tra feature
             # vera del paziente e quella ottenuta dal dataset completo
-        sv = shap_values[1] if isinstance(shap_values, list) else shap_values
+        sv = shap_values
+        if isinstance(sv, list):
+            sv = sv[1]              # lista [classe_0, classe_1]
+        elif isinstance(sv, np.ndarray) and sv.ndim == 3:
+            sv = sv[:, :, 1]         # (n_campioni, n_feature, n_classi) -> classe positiva
         shap_matrix[test_idx, :] = sv
 
     if np.isnan(shap_matrix).any():

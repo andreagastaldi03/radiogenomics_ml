@@ -20,7 +20,7 @@ from sklearn.model_selection import StratifiedKFold
 from sklearn.metrics import roc_auc_score
 from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import StandardScaler
-from sklearn.linear_model import LogisticRegression
+from sklearn.linear_model import LogisticRegressionCV
 from sklearn.ensemble import RandomForestClassifier
 
 import config
@@ -46,9 +46,12 @@ def _build_pipe(model_type: str):
     if model_type == "linear":
         return Pipeline([
             ("scaler", StandardScaler()),
-            ("clf", LogisticRegression(
+            ("clf", LogisticRegressionCV(
                 penalty="elasticnet", solver="saga", max_iter=5000,
-                C=0.01, l1_ratio=0.1, random_state=config.RANDOM_STATE
+                Cs=[0.01, 0.05, 0.1, 0.5, 1.0, 5.0],
+                l1_ratios=[0.1, 0.3, 0.5, 0.7, 0.9],
+                cv=3, scoring="roc_auc", 
+                random_state=config.RANDOM_STATE
             )),
         ])
     elif model_type == "tree":
@@ -178,6 +181,13 @@ def run_specification_curve(spec_grid=None, model_types=None,
                 X_reduced, y_bin, model_type, n_folds
             )
             fstats = _feature_stats(coef_matrix, model_type)
+            
+            collapsed = bool((fstats["fraction_nonzero"] == 0).all())
+            if collapsed:
+                print(f"[specification_curve] ATTENZIONE: modello collassato (nessuna feature "
+                      f"selezionata in nessun fold) per spec={spec} model={model_type} — "
+                      f"l'AUC per questa riga non riflette segnale, va scartata o rifatta con "
+                      f"regolarizzazione più debole.")
 
             top_feats = fstats["mean_abs_coefficient"].sort_values(
                 ascending=False
@@ -197,6 +207,7 @@ def run_specification_curve(spec_grid=None, model_types=None,
                 **spec, "model_type": model_type,
                 "auc_mean_fold": auc_mean, "auc_sd_fold": auc_sd,
                 "auc_pooled": auc_pooled, "n_features": X_reduced.shape[1],
+                "collapsed_model": collapsed,
             })
 
     spec_df = pd.DataFrame(spec_rows).sort_values("auc_pooled").reset_index(drop=True)

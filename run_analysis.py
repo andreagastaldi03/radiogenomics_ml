@@ -102,7 +102,7 @@ def main():
     # 5) SHAP sul modello con AUC migliore, calcolata out-of-fold e corredata di plot
     # ------------------------------------------------------------------
     if ml_pipeline.SHAP_AVAILABLE:
-        best_model_name = summary.iloc[0]["model"]
+        best_model_name = pooled_summary.iloc[0]["model"]
         model_type = ml_pipeline.MODEL_TYPE_MAP.get(best_model_name)
 
         if model_type is None:

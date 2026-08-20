@@ -18,6 +18,7 @@ from sklearn.linear_model import LogisticRegression
 import config
 import data_utils
 import diagnostics
+import ml_pipeline
 
 
 # ---------------------------------------------------------------------------
@@ -30,7 +31,7 @@ import diagnostics
 # pipeline sotto con quella corrispondente.
 BEST_MODEL_PARAMS = {"C": 0.01, "l1_ratio": 0.1}  # <-- sostituisci con i tuoi valori reali
 
-
+"""
 def build_best_pipeline():
     return Pipeline([
         ("scaler", StandardScaler()),
@@ -40,21 +41,33 @@ def build_best_pipeline():
             random_state=config.RANDOM_STATE
         )),
     ])
-
+"""
 
 def main():
     config.OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 
     X, y = data_utils.load_data(source=config.DATA_SOURCE)
     X_reduced = data_utils.neutral_feature_reduction(X)
+    
+    # determina automaticamente il modello migliore (pooled OOF AUC) e i suoi
+    # iperparametri, da quanto già salvato da run_analysis.py
+    pooled_summary = pd.read_csv(config.OUTPUT_DIR / "pooled_oof_model_comparison.csv")
+    best_model_name = pooled_summary.sort_values("pooled_oof_auc", ascending=False).iloc[0]["model"]
 
+    best_params_df = pd.read_csv(config.OUTPUT_DIR / f"{best_model_name}_best_params_per_fold.csv")
+    best_params = ml_pipeline.majority_vote_params(best_params_df.to_dict(orient="records"))
+    
+    print(f"[run_diagnostics] modello migliore (pooled OOF AUC): {best_model_name} | "
+          f"iperparametri (voto di maggioranza): {best_params}")
+
+    pipe = ml_pipeline.build_pipeline_from_best_params(best_model_name, best_params)
+    
     # ------------------------------------------------------------------
     # 1) TEST DI PERMUTAZIONE
     # ------------------------------------------------------------------
     print("\n" + "=" * 70)
     print("TEST DI PERMUTAZIONE")
     print("=" * 70)
-    pipe = build_best_pipeline()
     real_auc, permuted_aucs, p_value = diagnostics.permutation_test(X_reduced, y, pipe)
 
     diagnostics.plot_permutation_test(
@@ -64,6 +77,7 @@ def main():
         config.OUTPUT_DIR / "permutation_test_aucs.csv", index=False
     )
     with open(config.OUTPUT_DIR / "permutation_test_summary.txt", "w") as f:
+        f.write(f"Modello: {best_model_name} | iperparametri: {best_params}\n")
         f.write(f"AUC dati veri: {real_auc:.4f}\n")
         f.write(f"AUC media permutata: {permuted_aucs.mean():.4f} ± {permuted_aucs.std():.4f}\n")
         f.write(f"p-value empirico: {p_value:.4f}\n")
