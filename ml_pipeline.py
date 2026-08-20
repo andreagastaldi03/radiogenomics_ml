@@ -321,6 +321,9 @@ def compute_pooled_oof_metrics(results: dict, X: pd.DataFrame, y: pd.Series):
 
     for fold_i, (fold_model, test_idx) in enumerate(zip(results["fitted_models"], 
                                             results["test_indices"]), start=1):
+            # zip prende i due dict e crea un terzo dict in cui il primo elemento è la coppia  
+            # di primi elementi dei due dict passati come oggetto, enumerate aggiunge un 
+            # counter che inizia da 1 e non da zero
         test_idx = np.asarray(test_idx, dtype=int)
         X_test = X.iloc[test_idx]
 
@@ -328,8 +331,6 @@ def compute_pooled_oof_metrics(results: dict, X: pd.DataFrame, y: pd.Series):
         y_proba = fold_model.predict_proba(X_test)[:, 1]
 
         # Classe predetta dal modello.
-        # Usiamo predict() così la soglia è esattamente
-        # quella già utilizzata dalla pipeline attuale.
         y_pred = fold_model.predict(X_test)
 
         # Convertiamo eventualmente le classi originali
@@ -346,6 +347,11 @@ def compute_pooled_oof_metrics(results: dict, X: pd.DataFrame, y: pd.Series):
                 f"Alcuni pazienti compaiono in più di un "
                 f"outer test fold (fold {fold_i})."
             )
+            # prende oof_prob e lo valuta in tutti gli indici di test, ~np.isnan restituisce 
+            # true solo se NOT a NaN, any restituisce true solo se c'è almeno un true.
+            # al primo giro/fold tutto funziona, poi se però ci sono degli indici che erano già stati
+            # riempiti ai giri precedenti che ritornano in fold successivi scatta il meccanismo
+            # di controllo 
 
         # ----------------------------------------------------------
         # Salvataggio delle predizioni
@@ -361,12 +367,10 @@ def compute_pooled_oof_metrics(results: dict, X: pd.DataFrame, y: pd.Series):
     # Controllo finale
     # --------------------------------------------------------------
 
-    missing_mask = np.isnan(oof_probability)
+    missing_mask = np.isnan(oof_probability) # true se presenti NaN
 
-    if missing_mask.any():
-
+    if missing_mask.any(): # true se almeno un true
         missing_patients = X.index[missing_mask].tolist()
-
         raise RuntimeError(
             "Mancano predizioni OOF per alcuni pazienti: "
             f"{missing_patients}"
@@ -374,7 +378,6 @@ def compute_pooled_oof_metrics(results: dict, X: pd.DataFrame, y: pd.Series):
 
     # Controllo anche sulle classi predette
     if np.any(oof_prediction < 0):
-
         raise RuntimeError(
             "Mancano alcune predizioni di classe OOF."
         )

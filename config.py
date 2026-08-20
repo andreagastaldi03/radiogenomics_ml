@@ -76,7 +76,7 @@ BATCH_COL = None
 # pazienti secondo l'IQR (la differenza tra il 75° e il 25° percentile), più robusto
 # agli outlier della semplice varianza.
 # ---------------------------------------------------------------------------
-# "variance"       -> criterio attuale (soglia di varianza)
+# "variance"       -> soglia di varianza
 # "iqr_top_n"      -> tiene i GENE_IQR_TOP_N geni con IQR più alta
 # "iqr_top_pct"    -> tiene la percentuale GENE_IQR_TOP_PCT di geni più variabili
 # "iqr_threshold"  -> tiene i geni con IQR sopra GENE_IQR_THRESHOLD

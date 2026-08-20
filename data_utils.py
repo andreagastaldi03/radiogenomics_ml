@@ -287,14 +287,14 @@ def is_shape_column(colname: str) -> bool:
 # ---------------------------------------------------------------------------
 def neutral_feature_reduction(X: pd.DataFrame,
                                gene_selection_method: str = None,
-                               exclude_shape: bool = None) -> pd.DataFrame:
+                               exclude_shape: bool = None,
+                               redundancy_corr_threshold: float = None) -> pd.DataFrame:
     """
     riduce il numero di colonne prima di qualsiasi modello, senza mai guardare 
     l'etichetta ADK/SCC. Ora radiomica e genomica vengono ridotte SEPARATAMENTE 
-    (come nello studio statistico pregresso) invece che tutte insieme in un'unica
-    matrice di correlazione mista — questo evita che pochi geni molto
-    correlati "nascondano" la vera struttura di ridondanza radiomica (e
-    viceversa), ed è coerente con la metodologia già validata nel PDF.
+    invece che tutte insieme in un'unica matrice di correlazione mista — questo 
+    evita che pochi geni molto correlati "nascondano" la vera struttura di 
+    ridondanza radiomica (e viceversa), ed è coerente con la metodologia nel PDF.
 
     Se exclude_shape=True (default da config), le feature radiomiche "di
     forma" vengono ridotte per conto proprio, separate dalle feature di
@@ -302,8 +302,12 @@ def neutral_feature_reduction(X: pd.DataFrame,
 
     gene_selection_method: sovrascrive config.GENE_SELECTION_METHOD se
     vuoi provare un criterio diverso senza modificare config.py.
+    
+    redundancy_corr_threshold: sovrascrive config.REDUNDANCY_CORR_THRESHOLD se
+    vuoi provare un criterio diverso senza modificare config.py.
     """
     gene_selection_method = gene_selection_method or config.GENE_SELECTION_METHOD
+    redundancy_corr_threshold = redundancy_corr_threshold or config.REDUNDANCY_CORR_THRESHOLD
     exclude_shape = config.EXCLUDE_SHAPE_FROM_MAIN_REDUCTION if exclude_shape is None else exclude_shape
 
     rad_cols = [c for c in X.columns if c.startswith("rad__")]
@@ -320,18 +324,21 @@ def neutral_feature_reduction(X: pd.DataFrame,
                   f"(ridotte separatamente)")
 
             if nonshape_cols:
-                X_nonshape_reduced = redundancy_reduction(variance_filter(X[nonshape_cols]))
+                X_nonshape_reduced = redundancy_reduction(variance_filter(X[nonshape_cols]),
+                                                          corr_threshold=redundancy_corr_threshold)
                 pieces.append(X_nonshape_reduced)
             if shape_cols:
-                X_shape_reduced = redundancy_reduction(variance_filter(X[shape_cols]))
+                X_shape_reduced = redundancy_reduction(variance_filter(X[shape_cols]),
+                                                       corr_threshold=redundancy_corr_threshold)
                 pieces.append(X_shape_reduced)
         else:
-            pieces.append(redundancy_reduction(variance_filter(X[rad_cols])))
+            pieces.append(redundancy_reduction(variance_filter(X[rad_cols]), 
+                                               corr_threshold=redundancy_corr_threshold))
 
     # --- Blocco genomico ---
     if gen_cols:
         X_gen_selected = select_genes(X[gen_cols], method=gene_selection_method)
-        X_gen_reduced = redundancy_reduction(X_gen_selected)
+        X_gen_reduced = redundancy_reduction(X_gen_selected, corr_threshold=redundancy_corr_threshold)
         pieces.append(X_gen_reduced)
 
     if not pieces:
