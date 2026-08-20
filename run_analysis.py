@@ -68,17 +68,9 @@ def main():
     print("=" * 70)
     print(summary.to_string(index=False))
     
-    
     print("\n" + "=" * 70)
     print("CONFRONTO FOLD-LEVEL vs POOLED OOF")
     print("=" * 70)
-
-    print(
-        pooled_summary.to_string(
-            index=False
-        )
-    )
-
     print(pooled_summary.to_string(index=False))
 
     # salva i best_params per fold di ogni modello (utile per capire la stabilità del tuning)

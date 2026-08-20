@@ -225,7 +225,7 @@ def nested_cv_evaluate(X: pd.DataFrame, y: pd.Series, model_name: str,
         best_model = search.best_estimator_ # prendo il modello migliore
         y_pred = best_model.predict(X_test) # lo alleno sul test set, estrae la classe (non la prob)
         y_proba = best_model.predict_proba(X_test)[:, 1] # ritorna la probabilità continua, assegnata 
-            # alla classe positiva. il metodo restituisce una mtrice a due colonne, prob per ogni classe
+            # alla classe positiva. il metodo restituisce una matrice a due colonne, prob per ogni classe
             # quindi seleziono solo colonna con prob per classe 1
 
         results["auc"].append(roc_auc_score(y_test, y_proba)) # curva roc misura capacità di separare le
@@ -269,11 +269,7 @@ def run_all_models(X: pd.DataFrame, y: pd.Series):
 # ---------------------------------------------------------------------------
 # POOLED OUT-OF-FOLD METRICS
 # ---------------------------------------------------------------------------
-def compute_pooled_oof_metrics(
-    results: dict,
-    X: pd.DataFrame,
-    y: pd.Series,
-):
+def compute_pooled_oof_metrics(results: dict, X: pd.DataFrame, y: pd.Series):
     """
     Calcola le metriche pooled out-of-fold usando le stesse predizioni
     della nested CV esterna.
@@ -310,49 +306,26 @@ def compute_pooled_oof_metrics(
     n_samples = len(X)
 
     # Probabilità predette
-    oof_probability = np.full(
-        n_samples,
-        np.nan,
-        dtype=float,
-    )
+    oof_probability = np.full(n_samples, np.nan, dtype=float)
+        # Return a new array of given shape and type, filled with fill_value.
 
     # Classe predetta
-    oof_prediction = np.full(
-        n_samples,
-        -1,
-        dtype=int,
-    )
+    oof_prediction = np.full(n_samples, -1, dtype=int)
 
     # Outer fold di appartenenza
-    oof_fold = np.full(
-        n_samples,
-        -1,
-        dtype=int,
-    )
+    oof_fold = np.full(n_samples, -1, dtype=int)
 
     # --------------------------------------------------------------
     # Recupero delle predizioni OOF
     # --------------------------------------------------------------
 
-    for fold_i, (fold_model, test_idx) in enumerate(
-        zip(
-            results["fitted_models"],
-            results["test_indices"],
-        ),
-        start=1,
-    ):
-
-        test_idx = np.asarray(
-            test_idx,
-            dtype=int,
-        )
-
+    for fold_i, (fold_model, test_idx) in enumerate(zip(results["fitted_models"], 
+                                            results["test_indices"]), start=1):
+        test_idx = np.asarray(test_idx, dtype=int)
         X_test = X.iloc[test_idx]
 
         # Probabilità della classe positiva
-        y_proba = fold_model.predict_proba(
-            X_test
-        )[:, 1]
+        y_proba = fold_model.predict_proba(X_test)[:, 1]
 
         # Classe predetta dal modello.
         # Usiamo predict() così la soglia è esattamente
@@ -361,20 +334,14 @@ def compute_pooled_oof_metrics(
 
         # Convertiamo eventualmente le classi originali
         # nella codifica binaria 0/1.
-        y_pred_bin = (
-            y_pred == config.POSITIVE_CLASS
-        ).astype(int)
+        y_pred_bin = y_pred.astype(int)
 
         # ----------------------------------------------------------
         # Controllo: ogni paziente deve comparire una sola volta
         # come test nella CV esterna.
         # ----------------------------------------------------------
 
-        if np.any(
-            ~np.isnan(
-                oof_probability[test_idx]
-            )
-        ):
+        if np.any(~np.isnan(oof_probability[test_idx])):
             raise RuntimeError(
                 f"Alcuni pazienti compaiono in più di un "
                 f"outer test fold (fold {fold_i})."
@@ -394,15 +361,11 @@ def compute_pooled_oof_metrics(
     # Controllo finale
     # --------------------------------------------------------------
 
-    missing_mask = np.isnan(
-        oof_probability
-    )
+    missing_mask = np.isnan(oof_probability)
 
     if missing_mask.any():
 
-        missing_patients = X.index[
-            missing_mask
-        ].tolist()
+        missing_patients = X.index[missing_mask].tolist()
 
         raise RuntimeError(
             "Mancano predizioni OOF per alcuni pazienti: "
@@ -420,23 +383,11 @@ def compute_pooled_oof_metrics(
     # POOLED METRICS
     # --------------------------------------------------------------
 
-    pooled_auc = roc_auc_score(
-        y_bin,
-        oof_probability,
-    )
+    pooled_auc = roc_auc_score(y_bin, oof_probability)
 
-    pooled_balanced_accuracy = (
-        balanced_accuracy_score(
-            y_bin,
-            oof_prediction,
-        )
-    )
+    pooled_balanced_accuracy = (balanced_accuracy_score(y_bin, oof_prediction))
 
-    pooled_f1 = f1_score(
-        y_bin,
-        oof_prediction,
-        zero_division=0,
-    )
+    pooled_f1 = f1_score(y_bin, oof_prediction, zero_division=0)
 
     # --------------------------------------------------------------
     # Tabella paziente-per-paziente
@@ -452,19 +403,13 @@ def compute_pooled_oof_metrics(
 
     metrics = {
         "pooled_oof_auc": pooled_auc,
-        "pooled_oof_balanced_accuracy": (
-            pooled_balanced_accuracy
-        ),
+        "pooled_oof_balanced_accuracy": (pooled_balanced_accuracy),
         "pooled_oof_f1": pooled_f1,
     }
 
     return metrics, oof_df
 
-def run_pooled_oof_analysis(
-    all_results: dict,
-    X: pd.DataFrame,
-    y: pd.Series,
-):
+def run_pooled_oof_analysis(all_results: dict, X: pd.DataFrame, y: pd.Series):
     """
     Calcola le metriche pooled OOF per tutti i modelli.
 
@@ -483,11 +428,7 @@ def run_pooled_oof_analysis(
 
     for model_name, res in all_results.items():
 
-        metrics, oof_df = compute_pooled_oof_metrics(
-            res,
-            X,
-            y,
-        )
+        metrics, oof_df = compute_pooled_oof_metrics(res, X, y)
 
         # ----------------------------------------------------------
         # Salvataggio delle predizioni individuali
@@ -503,29 +444,17 @@ def run_pooled_oof_analysis(
         # Risultati fold-level
         # ----------------------------------------------------------
 
-        auc_mean = np.mean(
-            res["auc"]
-        )
+        auc_mean = np.mean(res["auc"])
 
-        auc_sd = np.std(
-            res["auc"]
-        )
+        auc_sd = np.std(res["auc"])
 
-        balacc_mean = np.mean(
-            res["balanced_accuracy"]
-        )
+        balacc_mean = np.mean(res["balanced_accuracy"])
 
-        balacc_sd = np.std(
-            res["balanced_accuracy"]
-        )
+        balacc_sd = np.std(res["balanced_accuracy"])
 
-        f1_mean = np.mean(
-            res["f1"]
-        )
+        f1_mean = np.mean(res["f1"])
 
-        f1_sd = np.std(
-            res["f1"]
-        )
+        f1_sd = np.std(res["f1"])
 
         # ----------------------------------------------------------
         # Riga comparativa
@@ -537,29 +466,17 @@ def run_pooled_oof_analysis(
             # AUC
             "auc_mean_fold": auc_mean,
             "auc_sd_fold": auc_sd,
-            "pooled_oof_auc": (
-                metrics["pooled_oof_auc"]
-            ),
+            "pooled_oof_auc": (metrics["pooled_oof_auc"]),
 
             # Balanced accuracy
-            "balanced_accuracy_mean_fold": (
-                balacc_mean
-            ),
-            "balanced_accuracy_sd_fold": (
-                balacc_sd
-            ),
-            "pooled_oof_balanced_accuracy": (
-                metrics[
-                    "pooled_oof_balanced_accuracy"
-                ]
-            ),
+            "balanced_accuracy_mean_fold": (balacc_mean),
+            "balanced_accuracy_sd_fold": (balacc_sd),
+            "pooled_oof_balanced_accuracy": (metrics["pooled_oof_balanced_accuracy"]),
 
             # F1
             "f1_mean_fold": f1_mean,
             "f1_sd_fold": f1_sd,
-            "pooled_oof_f1": (
-                metrics["pooled_oof_f1"]
-            ),
+            "pooled_oof_f1": (metrics["pooled_oof_f1"]),
         })
 
         # ----------------------------------------------------------
@@ -595,13 +512,8 @@ def run_pooled_oof_analysis(
     # Tabella finale
     # --------------------------------------------------------------
 
-    pooled_summary = (
-        pd.DataFrame(rows)
-        .sort_values(
-            "pooled_oof_auc",
-            ascending=False,
-        )
-        .reset_index(drop=True)
+    pooled_summary = (pd.DataFrame(rows).sort_values("pooled_oof_auc", ascending=False)
+                      .reset_index(drop=True)
     )
 
     pooled_summary.to_csv(
