@@ -5,12 +5,9 @@ scelte metodologiche ("multiverse analysis").
 Per ogni combinazione di preprocessing (data_source, selezione geni, shape,
 soglia di ridondanza) e per due modelli (Elastic Net lineare, Random Forest)
 calcoliamo:
-- AUC media sui fold (con sd) e AUC pooled out-of-fold (più robusta con n
-  piccolo: non è la media di 5 stime rumorose ma un'unica stima su tutti i
-  54 pazienti concatenando le predizioni out-of-fold)
+- AUC media sui fold e AUC pooled out-of-fold
 - statistiche complete sull'importanza di ogni feature attraverso i fold di
-  quella specifica (non solo la media, che con oscillazioni di segno può
-  nascondere una feature realmente importante ma incoerente in direzione)
+  quella specifica 
 """
 
 import itertools
@@ -41,8 +38,7 @@ SPEC_GRID = {
 
 # i "due best" modelli: lineare interpretabile via coefficienti, e ad
 # albero interpretabile via feature_importances_. Iperparametri FISSI per
-# ogni specifica (niente grid search qui dentro, vedi nota nella docstring
-# del modulo precedente: isoliamo l'effetto del preprocessing).
+# ogni specifica (niente grid search qui dentro).
 MODEL_TYPES = ["linear", "tree"]
 
 
@@ -52,13 +48,13 @@ def _build_pipe(model_type: str):
             ("scaler", StandardScaler()),
             ("clf", LogisticRegression(
                 penalty="elasticnet", solver="saga", max_iter=5000,
-                C=0.1, l1_ratio=0.3, random_state=config.RANDOM_STATE
+                C=0.01, l1_ratio=0.1, random_state=config.RANDOM_STATE
             )),
         ])
     elif model_type == "tree":
         return Pipeline([
             ("clf", RandomForestClassifier(
-                n_estimators=300, max_depth=5, min_samples_leaf=3,
+                n_estimators=200, max_depth=3, min_samples_leaf=5,
                 random_state=config.RANDOM_STATE
             )),
         ])
@@ -67,23 +63,24 @@ def _build_pipe(model_type: str):
 
 
 def _extract_importance(fitted_pipe, model_type: str, columns) -> pd.Series:
-    clf = fitted_pipe.named_steps["clf"]
+    clf = fitted_pipe.named_steps["clf"] # nella pipe considera solo modello, escludi std scaler
     if model_type == "linear":
         return pd.Series(clf.coef_.ravel(), index=columns)
     else:
         # feature_importances_ del Random Forest sono sempre >= 0 (non hanno segno,
         # misurano riduzione di impurità), a differenza dei coefficienti lineari
+        # questa proprietà fornisce una misura dell'importanza delle feature basata sulla 
+        # riduzione di impurità degli alberi. In termini intuitivi, feature molto usata 
+        # per fare split e split che migliorano molto la separazione
         return pd.Series(clf.feature_importances_, index=columns)
 
 
 def _cv_eval(X: pd.DataFrame, y_bin: pd.Series, model_type: str,
              n_folds: int = 5, random_state: int = config.RANDOM_STATE):
     """
-    k-fold CV semplice per UNA specifica + UN modello. Ritorna:
-    - auc_mean, auc_sd: media/sd dell'AUC calcolata fold per fold (come prima)
-    - auc_pooled: AUC su tutte le predizioni out-of-fold concatenate — con
-      n=54 diviso in 5 fold (~11 pazienti a fold) la stima fold-level ha
-      varianza enorme; la versione pooled è la stima più stabile da guardare
+    k-fold CV semplice per una specifica + un modello. Ritorna:
+    - auc_mean, auc_sd: media/sd dell'AUC calcolata fold per fold
+    - auc_pooled: AUC su tutte le predizioni out-of-fold concatenate 
     - coef_matrix: DataFrame (feature x fold) con l'importanza per fold,
       base per le statistiche del punto 2
     """
@@ -110,12 +107,10 @@ def _cv_eval(X: pd.DataFrame, y_bin: pd.Series, model_type: str,
 
 def _feature_stats(coef_matrix: pd.DataFrame, model_type: str) -> pd.DataFrame:
     """
-    Statistiche sull'importanza di ogni feature attraverso i fold di UNA
+    Statistiche sull'importanza di ogni feature attraverso i fold di una
     specifica. La sola media può andare vicino a zero per una feature che
     oscilla di segno tra fold pur essendo sistematicamente "usata" dal
-    modello (es. +0.8, -0.7, +0.9, -0.6, +0.75 -> media bassa ma
-    fraction_nonzero=100%, std alta): mean_abs e fraction_nonzero
-    catturano questo caso, mean_coefficient da solo no.
+    modello: mean_abs e fraction_nonzero catturano questo caso.
     """
     stats = pd.DataFrame({
         "mean_coefficient": coef_matrix.mean(axis=1),
@@ -178,7 +173,7 @@ def run_specification_curve(spec_grid=None, model_types=None,
         y_bin = (y == config.POSITIVE_CLASS).astype(int)
 
         for model_type in model_types:
-            print(f"[specification_curve] {spec} | model={model_type}")
+            #print(f"[specification_curve] {spec} | model={model_type}")
             auc_mean, auc_sd, auc_pooled, coef_matrix = _cv_eval(
                 X_reduced, y_bin, model_type, n_folds
             )
