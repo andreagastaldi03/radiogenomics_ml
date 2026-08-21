@@ -67,18 +67,52 @@ def build_feature_consensus(stable_features_path, shap_importance_path,
 
 
 if __name__ == "__main__":
+    run_output_dir = config.OUTPUT_DIR / config.DATA_SOURCE
+    
     # shap_feature_importance_*.csv ha nel nome il modello migliore trovato
     # da run_analysis.py, quindi lo cerchiamo dinamicamente invece di fissarlo
-    shap_files = list(config.OUTPUT_DIR.glob("shap_feature_importance_*.csv"))
+    shap_files = list(run_output_dir.glob("shap_feature_importance_*.csv"))
     if not shap_files:
         raise FileNotFoundError(
-            "Nessun shap_feature_importance_*.csv trovato: esegui prima run_analysis.py"
+            f"Nessun shap_feature_importance_*.csv trovato in {run_output_dir}: "
+            f"esegui prima run_analysis.py con DATA_SOURCE='{config.DATA_SOURCE}'"
+        )
+    shap_path = shap_files[0]
+    # il nome del modello migliore è incastonato nel filename, es.
+    # "shap_feature_importance_random_forest.csv" -> "random_forest"
+    best_model_name = shap_path.stem.replace("shap_feature_importance_", "")
+    
+    stable_files = list(run_output_dir.glob(f"stable_features_final_{best_model_name}.csv"))
+    if not stable_files:
+        raise FileNotFoundError(
+            f"Nessun stable_features_final_{best_model_name}.csv trovato in {run_output_dir}: "
+            f"controlla che la stability selection sia stata rifatta col modello migliore aggiornato."
+        )
+    stable_path = stable_files[0]
+    
+    # il file di voti della specification curve dipende dal TIPO di modello
+    # (linear/tree), non dal nome specifico, e la spec curve è globale
+    # (non nella sottocartella del data_source)
+    model_type = ml_pipeline.MODEL_TYPE_MAP.get(best_model_name)
+    if model_type is None:
+        raise ValueError(
+            f"'{best_model_name}' non è mappato in MODEL_TYPE_MAP: aggiungilo per poter "
+            f"scegliere automaticamente il file di voti della specification curve."
+        )
+    spec_votes_path = config.OUTPUT_DIR / f"feature_votes_across_specs_{model_type}.csv"
+    if not spec_votes_path.exists():
+        raise FileNotFoundError(
+            f"{spec_votes_path} non trovato: esegui prima run_specification_curve.py"
         )
 
+    print(f"[feature_consensus] modello migliore: {best_model_name} ({model_type})")
+    print(f"[feature_consensus] stability: {stable_path}")
+    print(f"[feature_consensus] shap: {shap_path}")
+    print(f"[feature_consensus] spec curve votes: {spec_votes_path}")
+
     build_feature_consensus(
-        stable_features_path=config.OUTPUT_DIR / "stable_features_final.csv",
-        shap_importance_path=shap_files[0],
-        spec_votes_path=config.OUTPUT_DIR / "feature_votes_across_specs_tree.csv",  
-        # o la versione _linear/_tree
-        output_path=config.OUTPUT_DIR / "feature_consensus.csv",
+        stable_features_path=stable_path,
+        shap_importance_path=shap_path,
+        spec_votes_path=spec_votes_path,
+        output_path=run_output_dir / "feature_consensus.csv",
     )
