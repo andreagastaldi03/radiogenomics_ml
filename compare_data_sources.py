@@ -32,6 +32,7 @@ import matplotlib.pyplot as plt
 from sklearn.metrics import roc_auc_score
 
 import config
+from delong import delong_test
 
 
 def paired_bootstrap_auc_diff(y_true: np.ndarray, proba_a: np.ndarray, proba_b: np.ndarray,
@@ -115,6 +116,17 @@ def compare_sources(model_name: str, source_a: str, source_b: str, n_boot: int =
     observed_diff, ci_low, ci_high, p_value, boot_diffs = paired_bootstrap_auc_diff(
         y_true_a, proba_a, proba_b, n_boot=n_boot
     )
+    
+    dl = delong_test(y_true_a, proba_a, proba_b)
+    print(f"\n  [DeLong] AUC {source_a}={dl['auc_a']:.3f} | AUC {source_b}={dl['auc_b']:.3f}")
+    print(f"  [DeLong] differenza: {dl['diff']:+.3f} (SE={dl['se_diff']:.3f}) | "
+          f"95% CI [{dl['ci_low']:+.3f}, {dl['ci_high']:+.3f}] | z={dl['z']:.2f} | 
+          f"p={dl['p_value']:.4f}")
+    if dl["ci_low"] < 0 < dl["ci_high"]:
+        print(f"  [DeLong] -> CI include lo 0: nessuna evidenza che {source_b} "
+              f"migliori su {source_a} (test asintotico esatto, non simulato).")
+    else:
+        print(f"  [DeLong] -> CI esclude lo 0: differenza statisticamente significativa.")
 
     print(f"\n[compare_sources] modello={model_name} | {source_a} vs {source_b} | n={len(merged)}")
     print(f"  AUC {source_a}: {roc_auc_score(y_true_a, proba_a):.3f}")
@@ -134,7 +146,7 @@ def compare_sources(model_name: str, source_a: str, source_b: str, n_boot: int =
     pd.Series(boot_diffs, name="auc_diff_bootstrap").to_csv(
         out_dir / f"bootstrap_diff_{model_name}_{source_a}_vs_{source_b}.csv", index=False)
 
-    return observed_diff, ci_low, ci_high, p_value
+    return observed_diff, ci_low, ci_high, p_value, dl
 
 
 if __name__ == "__main__":

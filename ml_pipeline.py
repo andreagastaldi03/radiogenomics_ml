@@ -425,7 +425,7 @@ def compute_pooled_oof_metrics(results: dict, X: pd.DataFrame, y: pd.Series):
 
     return metrics, oof_df
 
-def run_pooled_oof_analysis(all_results: dict, X: pd.DataFrame, y: pd.Series):
+def run_pooled_oof_analysis(all_results: dict, X: pd.DataFrame, y: pd.Series, output_dir=None):
     """
     Calcola le metriche pooled OOF per tutti i modelli.
 
@@ -436,6 +436,8 @@ def run_pooled_oof_analysis(all_results: dict, X: pd.DataFrame, y: pd.Series):
         pooled_oof_model_comparison.csv
     """
 
+    output_dir = output_dir or config.OUTPUT_DIR
+    output_dir.mkdir(parents=True, exist_ok=True)
     rows = []
 
     print("\n" + "=" * 70)
@@ -450,7 +452,7 @@ def run_pooled_oof_analysis(all_results: dict, X: pd.DataFrame, y: pd.Series):
         # ----------------------------------------------------------
 
         oof_df.to_csv(
-            config.OUTPUT_DIR
+            output_dir
             / f"{model_name}_oof_predictions.csv",
             index=False,
         )
@@ -527,7 +529,7 @@ def run_pooled_oof_analysis(all_results: dict, X: pd.DataFrame, y: pd.Series):
     )
 
     pooled_summary.to_csv(
-        config.OUTPUT_DIR
+        output_dir
         / "pooled_oof_model_comparison.csv",
         index=False,
     )
