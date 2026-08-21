@@ -9,6 +9,7 @@ un'interpretazione biologica.
 
 import pandas as pd
 import config
+import ml_pipeline
 
 
 def _normalize_rank(series: pd.Series) -> pd.Series:
