@@ -537,66 +537,73 @@ def run_pooled_oof_analysis(all_results: dict, X: pd.DataFrame, y: pd.Series):
 # ---------------------------------------------------------------------------
 # STABILITY SELECTION (bootstrap) — quali feature emergono ripetutamente
 # ---------------------------------------------------------------------------
+def _bootstrap_importance(pipe, X_boot, y_boot, model_type) -> pd.Series:
+    """Importanza delle feature per un bootstrap, in scala comparabile tra modelli:
+    valore assoluto del coefficiente per i lineari, feature_importances_ per gli alberi."""
+    pipe.fit(X_boot, y_boot)
+    clf = pipe.named_steps["clf"]
+    if model_type == "linear":
+        return pd.Series(np.abs(clf.coef_.ravel()), index=X_boot.columns)
+    elif model_type == "tree":
+        return pd.Series(clf.feature_importances_, index=X_boot.columns)
+    else:
+        raise ValueError(f"model_type '{model_type}' non gestito in _bootstrap_importance")
+
 def bootstrap_stability_selection(X: pd.DataFrame, y: pd.Series,
-                                   C: float, l1_ratio: float,
-                                   n_bootstrap=config.N_BOOTSTRAP,
-                                   threshold=config.STABILITY_SELECTION_THRESHOLD,
-                                   random_state=config.RANDOM_STATE):
+                                   model_name: str, best_params: dict,
+                                   n_bootstrap: int = config.N_BOOTSTRAP,
+                                   top_k_features: int = None,
+                                   random_state: int = config.RANDOM_STATE):
+    """    
+    Stability selection generalizzata a qualunque modello di MODEL_TYPE_MAP.
+    "Selezionata" = tra le top_k_features per importanza in quel bootstrap
+    (default: sqrt(n_feature), euristica comune quando non c'è un criterio
+    di sparsità nativo come per l'Elastic Net).
+
+    NB il criterio qui è "top-K", non "diverso da zero".
+    Con L1 forte i due criteri spesso coincidono nella pratica, ma non sono
+    matematicamente la stessa cosa.
     """
-    Rifitta un Elastic Net su n_bootstrap campioni bootstrap del dataset e
-    conta quante volte ciascuna feature riceve un coefficiente non nullo.
+    model_type = MODEL_TYPE_MAP.get(model_name)
+    if model_type is None:
+        raise ValueError(f"Stability selection non supportata per '{model_name}': "
+                          f"aggiungilo a MODEL_TYPE_MAP ('linear' o 'tree').")
 
-    Con n=54 questo è più informativo di un singolo fit: ti dice quali
-    feature sono "affidabilmente" rilevanti e non un artefatto del
-    particolare campione osservato. Queste sono le feature da riportare
-    come risultato principale, non i coefficienti di un singolo fit.
-    
-    IMPORTANTE: C e l1_ratio NON hanno un default arbitrario qui apposta.
-    Vanno passati quelli scelti dalla nested CV (vedi majority_vote_params
-    su all_results["elastic_net"]["best_params"]), altrimenti la stability
-    selection userebbe un modello diverso da quello effettivamente validato
-    come migliore in run_all_models().
-    """
-    y_bin = (y == config.POSITIVE_CLASS).astype(int)
-    n_samples = X.shape[0]
-    selection_counts = pd.Series(0, index=X.columns) # crea df di zeri, indicizzata coi nomi delle
-        # features di X
+    top_k_features = top_k_features or max(5, int(np.sqrt(X.shape[1])))
+    y_bin = (y == config.POSITIVE_CLASS).astype(int).reset_index(drop=True)
+    X = X.reset_index(drop=True)
 
-    rng = np.random.RandomState(random_state) # inizializza generatore di numeri casuali con seed fisso
-
-    pipe = Pipeline([
-        ("scaler", StandardScaler()),
-        ("clf", LogisticRegression(
-            penalty="elasticnet", solver="saga", max_iter=5000,
-            C=C, l1_ratio=l1_ratio, random_state=random_state
-        )),
-    ])
+    rng = np.random.RandomState(random_state)
+    selection_counts = pd.Series(0.0, index=X.columns)
 
     for b in range(n_bootstrap):
-        idx = rng.choice(n_samples, size=n_samples, replace=True) # creo un campion bootstrap, dimensione
+        boot_idx = rng.choice(len(X), size=len(X), replace=True) # creo un campion bootstrap, dimensione
             # di X, sorteggiato in modo casuale, possibilità di reinserimento, quindi più copie di un 
             # paziente e altri completamente assenti
-        X_boot, y_boot = X.iloc[idx], y_bin.iloc[idx]
-
+        X_boot, y_boot = X.iloc[boot_idx], y_bin.iloc[boot_idx]
+        
         if y_boot.nunique() < 2: # controlla ci siano entrambe le classi 
             continue  # bootstrap degenere, salta
 
-        pipe.fit(X_boot, y_boot) # addestro la pipe sul campione boot
-        coefs = pipe.named_steps["clf"].coef_.ravel() # prende coeff associati alle feature e li 
-            # appiattisce in un vettore 1d (ravel())
-        selected = X.columns[np.abs(coefs) > 1e-8] # scelgo le label delle colonne aventi coeff maggiori
-            # di zero (1e-8 per prob precisione numeri al computer)  
-        selection_counts[selected] += 1
+        pipe = build_pipeline_from_best_params(model_name, best_params)
+        importance = _bootstrap_importance(pipe, X_boot, y_boot, model_type)
+
+        top_feats = importance.sort_values(ascending=False).head(top_k_features).index
+        selection_counts[top_feats] += 1
+
+        if (b + 1) % 50 == 0:
+            print(f"[stability_selection] {b+1}/{n_bootstrap} bootstrap completati")
 
     stability_freq = selection_counts / n_bootstrap
-    stable_features = stability_freq[stability_freq >= threshold].sort_values(ascending=False)
+    stable_features = stability_freq[
+        stability_freq >= config.STABILITY_SELECTION_THRESHOLD
+    ].sort_values(ascending=False)
 
-    print(f"\n[stability_selection] {len(stable_features)} feature stabili "
-          f"(selezionate in >={threshold*100:.0f}% dei {n_bootstrap} bootstrap)")
-    print(stable_features)
+    print(f"\n[stability_selection] modello={model_name} | top_k={top_k_features} | "
+          f"{len(stable_features)} feature stabili (>= "
+          f"{config.STABILITY_SELECTION_THRESHOLD*100:.0f}% dei bootstrap)")
 
     return stability_freq, stable_features
-
 
 # ---------------------------------------------------------------------------
 # SHAP — interpretabilità del modello 

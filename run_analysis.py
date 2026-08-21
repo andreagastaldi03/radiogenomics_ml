@@ -79,22 +79,20 @@ def main():
         params_df.to_csv(config.OUTPUT_DIR / f"{model_name}_best_params_per_fold.csv", index=False)
 
     # ------------------------------------------------------------------
-    # 4) Stability selection (bootstrap) su Elastic Net, con gli iperparametri
-    #    effettivamente scelti come migliori dalla nested CV (non arbitrari)
+    # 4) Stability selection (bootstrap) 
     # ------------------------------------------------------------------
-    en_best_params = ml_pipeline.majority_vote_params(all_results["elastic_net"]["best_params"])
-    
+    best_model_name = pooled_summary.iloc[0]["model"]
+    best_params = ml_pipeline.majority_vote_params(all_results[best_model_name]["best_params"])
+
     stability_freq, stable_features = ml_pipeline.bootstrap_stability_selection(
-        X_reduced, y,
-        C=en_best_params["clf__C"],
-        l1_ratio=en_best_params["clf__l1_ratio"],
+        X_reduced, y, model_name=best_model_name, best_params=best_params
     )
     stability_freq.sort_values(ascending=False).to_csv(
-        config.OUTPUT_DIR / "feature_stability_frequencies.csv",
+        config.OUTPUT_DIR / f"feature_stability_frequencies_{best_model_name}.csv",
         header=["selection_frequency"]
     )
     stable_features.to_csv(
-        config.OUTPUT_DIR / "stable_features_final.csv",
+        config.OUTPUT_DIR / f"stable_features_final_{best_model_name}.csv",
         header=["selection_frequency"]
     )
 

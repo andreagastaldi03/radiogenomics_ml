@@ -78,7 +78,7 @@ if __name__ == "__main__":
     build_feature_consensus(
         stable_features_path=config.OUTPUT_DIR / "stable_features_final.csv",
         shap_importance_path=shap_files[0],
-        spec_votes_path=config.OUTPUT_DIR / "feature_votes_across_specs_linear.csv",  
+        spec_votes_path=config.OUTPUT_DIR / "feature_votes_across_specs_tree.csv",  
         # o la versione _linear/_tree
         output_path=config.OUTPUT_DIR / "feature_consensus.csv",
     )
