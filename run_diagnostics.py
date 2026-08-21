@@ -45,16 +45,18 @@ def build_best_pipeline():
 
 def main():
     config.OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+    run_output_dir = config.OUTPUT_DIR / config.DATA_SOURCE
+    run_output_dir.mkdir(parents=True, exist_ok=True)
 
     X, y = data_utils.load_data(source=config.DATA_SOURCE)
     X_reduced = data_utils.neutral_feature_reduction(X)
     
     # determina automaticamente il modello migliore (pooled OOF AUC) e i suoi
     # iperparametri, da quanto già salvato da run_analysis.py
-    pooled_summary = pd.read_csv(config.OUTPUT_DIR / "pooled_oof_model_comparison.csv")
+    pooled_summary = pd.read_csv(run_output_dir / "pooled_oof_model_comparison.csv")
     best_model_name = pooled_summary.sort_values("pooled_oof_auc", ascending=False).iloc[0]["model"]
 
-    best_params_df = pd.read_csv(config.OUTPUT_DIR / f"{best_model_name}_best_params_per_fold.csv")
+    best_params_df = pd.read_csv(run_output_dir / f"{best_model_name}_best_params_per_fold.csv")
     best_params = ml_pipeline.majority_vote_params(best_params_df.to_dict(orient="records"))
     
     print(f"[run_diagnostics] modello migliore (pooled OOF AUC): {best_model_name} | "
@@ -71,12 +73,12 @@ def main():
     real_auc, permuted_aucs, p_value = diagnostics.permutation_test(X_reduced, y, pipe)
 
     diagnostics.plot_permutation_test(
-        real_auc, permuted_aucs, config.OUTPUT_DIR / "permutation_test.png"
+        real_auc, permuted_aucs, run_output_dir / "permutation_test.png"
     )
     pd.Series(permuted_aucs, name="auc_permutato").to_csv(
-        config.OUTPUT_DIR / "permutation_test_aucs.csv", index=False
+        run_output_dir / "permutation_test_aucs.csv", index=False
     )
-    with open(config.OUTPUT_DIR / "permutation_test_summary.txt", "w") as f:
+    with open(run_output_dir / "permutation_test_summary.txt", "w") as f:
         f.write(f"Modello: {best_model_name} | iperparametri: {best_params}\n")
         f.write(f"AUC dati veri: {real_auc:.4f}\n")
         f.write(f"AUC media permutata: {permuted_aucs.mean():.4f} ± {permuted_aucs.std():.4f}\n")
@@ -92,10 +94,10 @@ def main():
 
     diagnostics.batch_effect_diagnostic(
         X_reduced, y, batch=batch,
-        output_path=config.OUTPUT_DIR / "batch_effect_pca.png"
+        output_path=run_output_dir / "batch_effect_pca.png"
     )
 
-    print(f"\nDiagnostica completata. File salvati in: {config.OUTPUT_DIR}")
+    print(f"\nDiagnostica completata. File salvati in: {run_output_dir}")
 
 
 if __name__ == "__main__":
