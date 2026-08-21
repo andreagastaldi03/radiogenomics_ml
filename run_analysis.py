@@ -41,18 +41,20 @@ def summarize_results(all_results: dict) -> pd.DataFrame:
 
 def main():
     config.OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+    run_output_dir = config.OUTPUT_DIR / config.DATA_SOURCE
+    run_output_dir.mkdir(parents=True, exist_ok=True)
 
     # ------------------------------------------------------------------
     # 1) Caricamento dati
     # ------------------------------------------------------------------
     X, y = data_utils.load_data(source=config.DATA_SOURCE)
-    X.to_csv(config.OUTPUT_DIR / "X_features.csv")
+    X.to_csv(run_output_dir / "X_features.csv")
 
     # ------------------------------------------------------------------
     # 2) Riduzione feature neutra (NON guarda la label)
     # ------------------------------------------------------------------
     X_reduced = data_utils.neutral_feature_reduction(X)
-    X_reduced.to_csv(config.OUTPUT_DIR / "X_reduced_features.csv")
+    X_reduced.to_csv(run_output_dir / "X_reduced_features.csv")
 
     # ------------------------------------------------------------------
     # 3) Nested CV su tutti i modelli
@@ -60,7 +62,7 @@ def main():
     all_results = ml_pipeline.run_all_models(X_reduced, y)
 
     summary = summarize_results(all_results)
-    summary.to_csv(config.OUTPUT_DIR / "model_comparison_summary.csv", index=False)
+    summary.to_csv(run_output_dir / "model_comparison_summary.csv", index=False)
     pooled_summary = ml_pipeline.run_pooled_oof_analysis(all_results, X_reduced, y)
 
     print("\n" + "=" * 70)
@@ -76,7 +78,7 @@ def main():
     # salva i best_params per fold di ogni modello (utile per capire la stabilità del tuning)
     for model_name, res in all_results.items():
         params_df = pd.DataFrame(res["best_params"])
-        params_df.to_csv(config.OUTPUT_DIR / f"{model_name}_best_params_per_fold.csv", index=False)
+        params_df.to_csv(run_output_dir / f"{model_name}_best_params_per_fold.csv", index=False)
 
     # ------------------------------------------------------------------
     # 4) Stability selection (bootstrap) 
@@ -88,11 +90,11 @@ def main():
         X_reduced, y, model_name=best_model_name, best_params=best_params
     )
     stability_freq.sort_values(ascending=False).to_csv(
-        config.OUTPUT_DIR / f"feature_stability_frequencies_{best_model_name}.csv",
+        run_output_dir / f"feature_stability_frequencies_{best_model_name}.csv",
         header=["selection_frequency"]
     )
     stable_features.to_csv(
-        config.OUTPUT_DIR / f"stable_features_final_{best_model_name}.csv",
+        run_output_dir / f"stable_features_final_{best_model_name}.csv",
         header=["selection_frequency"]
     )
 
@@ -117,23 +119,23 @@ def main():
 
             # matrice completa pazienti x feature: riusabile anche come input
             # per lo studio di rete (es. correlazioni tra profili di importanza SHAP)
-            shap_df.to_csv(config.OUTPUT_DIR / f"shap_values_{best_model_name}_out_of_fold.csv")
+            shap_df.to_csv(run_output_dir / f"shap_values_{best_model_name}_out_of_fold.csv")
             mean_abs_shap.to_csv(
-                config.OUTPUT_DIR / f"shap_feature_importance_{best_model_name}.csv",
+                run_output_dir / f"shap_feature_importance_{best_model_name}.csv",
                 header=["mean_abs_shap"]
             )
 
             ml_pipeline.plot_shap_bar(
-                mean_abs_shap, config.OUTPUT_DIR / f"shap_bar_{best_model_name}.png"
+                mean_abs_shap, run_output_dir / f"shap_bar_{best_model_name}.png"
             )
             ml_pipeline.plot_shap_summary(
-                shap_df, X_reduced, config.OUTPUT_DIR / f"shap_summary_{best_model_name}.png"
+                shap_df, X_reduced, run_output_dir / f"shap_summary_{best_model_name}.png"
             )
             for feat in mean_abs_shap.head(3).index:
                 safe_name = feat.replace("/", "_").replace(" ", "_")
                 ml_pipeline.plot_shap_dependence(
                     shap_df, X_reduced, feat,
-                    config.OUTPUT_DIR / f"shap_dependence_{safe_name}.png"
+                    run_output_dir / f"shap_dependence_{safe_name}.png"
                 )
 
             print("\n[SHAP] Top 15 feature per importanza media |SHAP| (out-of-fold):")
@@ -163,10 +165,10 @@ def main():
         "n_inner_folds": config.N_INNER_FOLDS,
         "n_bootstrap_stability": config.N_BOOTSTRAP,
     }
-    with open(config.OUTPUT_DIR / "run_config.json", "w") as f:
+    with open(run_output_dir / "run_config.json", "w") as f:
         json.dump(run_config, f, indent=2)
 
-    print(f"\nTutti i risultati sono stati salvati in: {config.OUTPUT_DIR}")
+    print(f"\nTutti i risultati sono stati salvati in: {run_output_dir}")
 
 
 if __name__ == "__main__":
