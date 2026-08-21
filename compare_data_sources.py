@@ -120,7 +120,7 @@ def compare_sources(model_name: str, source_a: str, source_b: str, n_boot: int =
     dl = delong_test(y_true_a, proba_a, proba_b)
     print(f"\n  [DeLong] AUC {source_a}={dl['auc_a']:.3f} | AUC {source_b}={dl['auc_b']:.3f}")
     print(f"  [DeLong] differenza: {dl['diff']:+.3f} (SE={dl['se_diff']:.3f}) | "
-          f"95% CI [{dl['ci_low']:+.3f}, {dl['ci_high']:+.3f}] | z={dl['z']:.2f} | 
+          f"95% CI [{dl['ci_low']:+.3f}, {dl['ci_high']:+.3f}] | z={dl['z']:.2f} | " 
           f"p={dl['p_value']:.4f}")
     if dl["ci_low"] < 0 < dl["ci_high"]:
         print(f"  [DeLong] -> CI include lo 0: nessuna evidenza che {source_b} "
