@@ -1,6 +1,6 @@
 """
 Confronto statistico tra due sorgenti dati (es. "genomics" vs "both") sugli
-STESSI pazienti, riusando le predizioni out-of-fold già salvate da
+stessi pazienti, riusando le predizioni out-of-fold già salvate da
 run_pooled_oof_analysis (nessun nuovo fit).
 
 Domanda a cui risponde: "aggiungere la radiomica ai geni migliora davvero
@@ -13,6 +13,10 @@ condizioni), preservando l'accoppiamento paziente-per-paziente — è quello
 che rende il confronto più potente di un test naive tra due AUC
 indipendenti, perché elimina la variabilità dovuta a "quali pazienti sono
 nel campione" e isola quella dovuta a "quale sorgente dati uso".
+
+Dato lo stesso insieme di pazienti e due modelli che producono due serie di 
+probabilità predette, la performance AUC del modello B è significativamente 
+diversa da quella del modello A?
 
 Uso:
     python compare_data_sources.py --model elastic_net --source_a genomics --source_b both
@@ -40,13 +44,14 @@ def paired_bootstrap_auc_diff(y_true: np.ndarray, proba_a: np.ndarray, proba_b: 
     p_value : due code, per H0: differenza = 0
     boot_diffs : tutte le differenze bootstrap, per il plot
     """
-    n = len(y_true)
-    observed_diff = roc_auc_score(y_true, proba_b) - roc_auc_score(y_true, proba_a)
+    n = len(y_true) # dimensione del dataset
+    observed_diff = roc_auc_score(y_true, proba_b) - roc_auc_score(y_true, proba_a) 
+        # reali differenze tra auc dei due modelli
 
     rng = np.random.RandomState(random_state)
     boot_diffs = np.empty(n_boot)
     for i in range(n_boot):
-        idx = rng.randint(0, n, size=n)
+        idx = rng.randint(0, n, size=n) # creo oggetto di dim n, con numeri random tra 0 e n
         y_b = y_true[idx]
         # con classi sbilanciate un ricampionamento può capitare tutto in una
         # classe sola: l'AUC non è definita, si ricampiona finché non serve
@@ -54,10 +59,13 @@ def paired_bootstrap_auc_diff(y_true: np.ndarray, proba_a: np.ndarray, proba_b: 
             idx = rng.randint(0, n, size=n)
             y_b = y_true[idx]
         auc_a = roc_auc_score(y_b, proba_a[idx])
-        auc_b = roc_auc_score(y_b, proba_b[idx])
+        auc_b = roc_auc_score(y_b, proba_b[idx]) # stessi pazienti per entrambe le prob, per 
+            # entrambi i modelli, auc relative agli stessi pazienti
         boot_diffs[i] = auc_b - auc_a
 
-    ci_low, ci_high = np.percentile(boot_diffs, [2.5, 97.5])
+    ci_low, ci_high = np.percentile(boot_diffs, [2.5, 97.5]) # prende il 2,5 e il 97,5 percentile, 
+        # valori plausibili dovrebbero essere compresi tra questi due valori - interv di confid del
+        # 95%
     if observed_diff >= 0:
         p_value = min(2 * (boot_diffs <= 0).mean(), 1.0)
     else:

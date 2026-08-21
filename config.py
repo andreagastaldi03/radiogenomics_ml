@@ -25,7 +25,7 @@ POSITIVE_CLASS = "ADK"   # classe codificata come 1 nelle metriche
 # "radiomics"  -> solo feature TAC
 # "genomics"   -> solo feature genomiche
 # "both"       -> early fusion (concatenazione)
-DATA_SOURCE = "both"
+DATA_SOURCE = "genomics"
 
 # ---------------------------------------------------------------------------
 # RIDUZIONE FEATURE "NEUTRA" (indipendente dalla label)
