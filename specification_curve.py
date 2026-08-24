@@ -260,7 +260,7 @@ def run_specification_curve(spec_grid=None, model_types=None,
             if fixed_params_dict is not None and spec_key in fixed_params_dict:
                 current_fixed_params = fixed_params_dict[spec_key]
             
-            auc_mean, auc_sd, auc_pooled, coef_matrix = _cv_eval(
+            auc_mean, auc_sd, auc_pooled, coef_matrix, chosen_params = _cv_eval(
                 X_reduced, y_bin, model_type, n_folds,
                 random_state=config.RANDOM_STATE,
                 fixed_params=current_fixed_params
