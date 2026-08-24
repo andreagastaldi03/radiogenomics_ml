@@ -42,6 +42,10 @@ N_INNER_FOLDS = 5
 N_REPEATS_OUTER = 10       # ripeti la CV esterna con seed diversi per stimare la varianza della stima
 RANDOM_STATE = 42
 
+# CI bootstrap sulla AUC pooled out-of-fold: ricampiona i pazienti (con
+# reinserimento) dalle predizioni OOF già salvate, nessun nuovo fit. 
+N_BOOTSTRAP_AUC_CI = 2000
+
 # ---------------------------------------------------------------------------
 # STABILITY SELECTION (per la parte di rete / interpretazione)
 # ---------------------------------------------------------------------------

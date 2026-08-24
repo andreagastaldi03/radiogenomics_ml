@@ -317,7 +317,6 @@ def compute_pooled_oof_metrics(results: dict, X: pd.DataFrame, y: pd.Series):
     # --------------------------------------------------------------
     # Target binario
     # --------------------------------------------------------------
-
     y_bin = (y == config.POSITIVE_CLASS).astype(int)
 
     n_samples = len(X)
@@ -335,7 +334,6 @@ def compute_pooled_oof_metrics(results: dict, X: pd.DataFrame, y: pd.Series):
     # --------------------------------------------------------------
     # Recupero delle predizioni OOF
     # --------------------------------------------------------------
-
     for fold_i, (fold_model, test_idx) in enumerate(zip(results["fitted_models"], 
                                             results["test_indices"]), start=1):
             # zip prende i due dict e crea un terzo dict in cui il primo elemento è la coppia  
@@ -358,7 +356,6 @@ def compute_pooled_oof_metrics(results: dict, X: pd.DataFrame, y: pd.Series):
         # Controllo: ogni paziente deve comparire una sola volta
         # come test nella CV esterna.
         # ----------------------------------------------------------
-
         if np.any(~np.isnan(oof_probability[test_idx])):
             raise RuntimeError(
                 f"Alcuni pazienti compaiono in più di un "
@@ -373,7 +370,6 @@ def compute_pooled_oof_metrics(results: dict, X: pd.DataFrame, y: pd.Series):
         # ----------------------------------------------------------
         # Salvataggio delle predizioni
         # ----------------------------------------------------------
-
         oof_probability[test_idx] = y_proba
         oof_prediction[test_idx] = y_pred_bin
         oof_fold[test_idx] = fold_i
@@ -381,7 +377,6 @@ def compute_pooled_oof_metrics(results: dict, X: pd.DataFrame, y: pd.Series):
     # --------------------------------------------------------------
     # Controllo finale
     # --------------------------------------------------------------
-
     missing_mask = np.isnan(oof_probability) # true se presenti NaN
 
     if missing_mask.any(): # true se almeno un true
@@ -400,7 +395,6 @@ def compute_pooled_oof_metrics(results: dict, X: pd.DataFrame, y: pd.Series):
     # --------------------------------------------------------------
     # POOLED METRICS
     # --------------------------------------------------------------
-
     pooled_auc = roc_auc_score(y_bin, oof_probability)
     pooled_balanced_accuracy = (balanced_accuracy_score(y_bin, oof_prediction))
     pooled_f1 = f1_score(y_bin, oof_prediction, zero_division=0)
@@ -408,7 +402,6 @@ def compute_pooled_oof_metrics(results: dict, X: pd.DataFrame, y: pd.Series):
     # --------------------------------------------------------------
     # Tabella paziente-per-paziente
     # --------------------------------------------------------------
-
     oof_df = pd.DataFrame({
         "patient": X.index,
         "y_true": y_bin.to_numpy(),
@@ -425,6 +418,80 @@ def compute_pooled_oof_metrics(results: dict, X: pd.DataFrame, y: pd.Series):
 
     return metrics, oof_df
 
+
+def bootstrap_pooled_auc_ci(y_true: np.ndarray, proba: np.ndarray,
+                             n_boot: int = None, random_state: int = None):
+    """
+    CI bootstrap (percentile, 95%) sulla AUC pooled out-of-fold.
+ 
+    Ricampiona con reinserimento i pazienti dalle predizioni OOF già
+    salvate che sono già state calcolate da compute_pooled_oof_metrics). 
+    Risponde alla domanda "quanto è incerta questa stima puntuale di 
+    AUC pooled, con n=54?" — un singolo numero come "AUC pooled = 0.543" 
+    nasconde quest'incertezza.
+ 
+    Parametri
+    ---------
+    y_true, proba : array 1D, stessa lunghezza, allineati per paziente
+        (le colonne "y_true" e "oof_probability" di oof_df).
+    n_boot : numero di ricampionamenti bootstrap (default: config.N_BOOTSTRAP_AUC_CI)
+    random_state : seed (default: config.RANDOM_STATE)
+ 
+    Ritorna
+    -------
+    observed_auc : AUC pooled sui dati osservati (dovrebbe coincidere con
+        quella già calcolata da compute_pooled_oof_metrics)
+    ci_low, ci_high : CI 95% percentile della AUC pooled
+    boot_aucs : tutte le AUC bootstrap, per il plot/salvataggio
+    """
+    n_boot = n_boot if n_boot is not None else config.N_BOOTSTRAP_AUC_CI
+    random_state = config.RANDOM_STATE if random_state is None else random_state
+ 
+    y_true = np.asarray(y_true)
+    proba = np.asarray(proba)
+    n = len(y_true)
+    observed_auc = roc_auc_score(y_true, proba)
+ 
+    rng = np.random.RandomState(random_state)
+    boot_aucs = np.empty(n_boot)
+    for i in range(n_boot):
+        idx = rng.randint(0, n, size=n)
+        y_b = y_true[idx]
+        # con classi sbilanciate un ricampionamento può capitare tutto in
+        # una classe sola: l'AUC non è definita, si ricampiona finché non serve
+        while len(np.unique(y_b)) < 2:
+            idx = rng.randint(0, n, size=n)
+            y_b = y_true[idx]
+        boot_aucs[i] = roc_auc_score(y_b, proba[idx])
+ 
+    ci_low, ci_high = np.percentile(boot_aucs, [2.5, 97.5])
+    return observed_auc, ci_low, ci_high, boot_aucs
+ 
+    
+def plot_auc_bootstrap_ci(boot_aucs: np.ndarray, observed_auc: float, ci_low: float,
+                           ci_high: float, model_name: str, output_path):
+    """
+    Istogramma della distribuzione bootstrap della AUC pooled, con CI 95% 
+    e riferimento al caso (0.5).
+    """
+    plt.figure(figsize=(7, 5))
+    plt.hist(boot_aucs, bins=40, color="#8C8C8C", edgecolor="white")
+    plt.axvline(0.5, color="black", linestyle="--", linewidth=1, label="AUC = 0.5 (caso)")
+    plt.axvline(observed_auc, color="#4C72B0", linewidth=2,
+                label=f"AUC pooled osservata = {observed_auc:.3f}")
+    plt.axvline(ci_low, color="#C44E52", linestyle=":", linewidth=1.5,
+                label=f"CI 95% [{ci_low:.3f}, {ci_high:.3f}]")
+    plt.axvline(ci_high, color="#C44E52", linestyle=":", linewidth=1.5)
+    plt.xlabel("AUC pooled (bootstrap sui pazienti)")
+    plt.ylabel("Numero di bootstrap")
+    plt.title(f"Incertezza della AUC pooled — {model_name}")
+    plt.legend()
+    plt.tight_layout()
+    plt.savefig(output_path, dpi=150, bbox_inches="tight")
+    plt.close()
+    print(f"[plot_auc_bootstrap_ci] salvato in {output_path}")
+
+    
 def run_pooled_oof_analysis(all_results: dict, X: pd.DataFrame, y: pd.Series, output_dir=None):
     """
     Calcola le metriche pooled OOF per tutti i modelli.
@@ -450,17 +517,31 @@ def run_pooled_oof_analysis(all_results: dict, X: pd.DataFrame, y: pd.Series, ou
         # ----------------------------------------------------------
         # Salvataggio delle predizioni individuali
         # ----------------------------------------------------------
-
         oof_df.to_csv(
             output_dir
             / f"{model_name}_oof_predictions.csv",
             index=False,
         )
+        
+        # ----------------------------------------------------------
+        # CI bootstrap sulla AUC pooled (riusa le predizioni OOF appena
+        # calcolate, nessun nuovo fit)
+        # ----------------------------------------------------------
+        auc_observed, auc_ci_low, auc_ci_high, boot_aucs = bootstrap_pooled_auc_ci(
+            oof_df["y_true"].to_numpy(), oof_df["oof_probability"].to_numpy()
+        )
+ 
+        pd.Series(boot_aucs, name="pooled_auc_bootstrap").to_csv(
+            output_dir / f"{model_name}_pooled_auc_bootstrap.csv", index=False
+        )
+        plot_auc_bootstrap_ci(
+            boot_aucs, auc_observed, auc_ci_low, auc_ci_high, model_name,
+            output_dir / f"{model_name}_pooled_auc_bootstrap.png"
+        )
 
         # ----------------------------------------------------------
         # Risultati fold-level
         # ----------------------------------------------------------
-
         auc_mean = np.mean(res["auc"])
         auc_sd = np.std(res["auc"])
         balacc_mean = np.mean(res["balanced_accuracy"])
@@ -471,7 +552,6 @@ def run_pooled_oof_analysis(all_results: dict, X: pd.DataFrame, y: pd.Series, ou
         # ----------------------------------------------------------
         # Riga comparativa
         # ----------------------------------------------------------
-
         rows.append({
             "model": model_name,
 
@@ -483,7 +563,8 @@ def run_pooled_oof_analysis(all_results: dict, X: pd.DataFrame, y: pd.Series, ou
             # Balanced accuracy
             "balanced_accuracy_mean_fold": (balacc_mean),
             "balanced_accuracy_sd_fold": (balacc_sd),
-            "pooled_oof_balanced_accuracy": (metrics["pooled_oof_balanced_accuracy"]),
+            "pooled_oof_balanced_accuracy": 
+                        (metrics["pooled_oof_balanced_accuracy"]),
 
             # F1
             "f1_mean_fold": f1_mean,
@@ -494,7 +575,6 @@ def run_pooled_oof_analysis(all_results: dict, X: pd.DataFrame, y: pd.Series, ou
         # ----------------------------------------------------------
         # Stampa
         # ----------------------------------------------------------
-
         print(
             f"\n[{model_name}]"
         )
@@ -523,7 +603,6 @@ def run_pooled_oof_analysis(all_results: dict, X: pd.DataFrame, y: pd.Series, ou
     # --------------------------------------------------------------
     # Tabella finale
     # --------------------------------------------------------------
-
     pooled_summary = (pd.DataFrame(rows).sort_values("pooled_oof_auc", ascending=False)
                       .reset_index(drop=True)
     )
