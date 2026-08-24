@@ -258,7 +258,7 @@ def select_genes(X_genes: pd.DataFrame, method: str = None, print_info: bool = T
     method = method or config.GENE_SELECTION_METHOD
 
     if method == "variance":
-        return variance_filter(X_genes)
+        return variance_filter(X_genes, print_info=print_info)
 
     iqr = X_genes.quantile(0.75) - X_genes.quantile(0.25)
 
