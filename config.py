@@ -110,7 +110,7 @@ EXCLUDE_SHAPE_FROM_MAIN_REDUCTION = True
 # si usa di default una griglia ridotta (vedi REDUCED_SPEC_GRID in
 # specification_curve.py) e un N di permutazioni contenuto.
 # ---------------------------------------------------------------------------
-N_PERMUTATIONS_SPEC_CURVE = 100     # Simonsohn consiglia 500+, ma con n=54 e una
+N_PERMUTATIONS_SPEC_CURVE = 10      # Simonsohn consiglia 500+, ma con n=54 e una
                                     # griglia di specifiche già 50-100 è un 
                                     # compromesso ragionevole
 SPEC_CURVE_SUMMARY_STAT = "median"  # statistica riassuntiva della curva: "median" 

@@ -51,7 +51,7 @@ REDUCED_SPEC_GRID = {
 }
 
 # i "due best" modelli: lineare interpretabile via coefficienti, e ad
-# albero interpretabile via feature_importances_. Iperparametri FISSI per
+# albero interpretabile via feature_importances_. Iperparametri fissi per
 # ogni specifica (niente grid search qui dentro).
 MODEL_TYPES = ["linear", "tree"]
 
@@ -141,8 +141,14 @@ def _cv_eval(X: pd.DataFrame, y_bin: pd.Series, model_type: str,
     if model_type == "linear":
         if fixed_params is None:
             param_tuples = [tuple(sorted(p.items())) for p in fold_params]
+                # prende elem da fold_param, ogni elem è un dict. li ordina secondo il valore 
+                # poi li rende una tupla (oggetto immutabile e "contabile")
             most_common, _ = Counter(param_tuples).most_common(1)[0]
+                # conta quante volte compare ogni elemento, salva il più freq [0], siccome
+                # most common restituisce una lista con il più freq e la freq, [0] oggetto e
+                # [1] la freq (secondo elemento)
             chosen_params = dict(most_common)
+                # ritrasformo in un comodo dict
         else:
             chosen_params = fixed_params
 
@@ -181,7 +187,8 @@ def run_specification_curve(spec_grid=None, model_types=None,
                              n_folds: int = 5, top_n_features: int = 15,
                              permute_labels: bool = False,
                              random_state: int = config.RANDOM_STATE,
-                             fixed_params_dict: dict = None):
+                             fixed_params_dict: dict = None,
+                             verbose: bool = True):
     """
     Parametri aggiuntivi
     --------------------
@@ -246,14 +253,17 @@ def run_specification_curve(spec_grid=None, model_types=None,
                 # permuto i valori mantenendo l'indice/ordine dei pazienti invariato,
                 # cosi' resta allineato riga-per-riga con X_reduced per qualunque 
                 # spec di questa stessa data_source
-                shuffled_values = perm_rng.permutation(y_bin.to_numpy())
+                shuffled_values = perm_rng.permutation(y_bin.to_numpy()) # permuto gli y_bin
                 permuted_y_cache[spec["data_source"]] = pd.Series(shuffled_values,
                                                                   index=y_bin.index)
+                    # salvo la y_cache permutata con questa serie di valuri shuffled, ma 
+                    # con gli stessi indici di y_bin, salvo solo l'ordine casuale delle y
             y_bin = permuted_y_cache[spec["data_source"]]
 
 
         for model_type in model_types:
-            print(f"[specification_curve] {spec} | model={model_type}")
+            if verbose:
+                print(f"[specification_curve] {spec} | model={model_type}")
             
             spec_key = tuple(spec.values()) + (model_type,)
             current_fixed_params = None
@@ -303,7 +313,7 @@ def run_specification_curve(spec_grid=None, model_types=None,
     feature_stats_long_df = pd.concat(feature_stats_long, ignore_index=True)
 
     print(f"\n[specification_curve] {len(spec_df)} combinazioni (specifica x modello) testate | "
-          f"AUC pooled min={spec_df['auc_pooled'].min():.3f} max={spec_df['auc_pooled'].max():.3f}")
+          f"AUC pooled min={spec_df['auc_pooled'].min():.3f} max={spec_df['auc_pooled'].max():.3f}\n")
 
     return spec_df, feature_votes, feature_votes_by_model, feature_stats_long_df
 
@@ -358,17 +368,18 @@ def joint_significance_test(spec_grid=None, model_types=None, n_folds: int = 5,
     summary_stat = summary_stat or config.SPEC_CURVE_SUMMARY_STAT
  
     n_combos = len(list(itertools.product(*spec_grid.values()))) * len(model_types)
-    print(f"[joint_significance_test] curva reale su griglia ridotta "
-          f"({n_combos} combinazioni specifica x modello)...")
+    print(f"\n[joint_significance_test] curva reale su griglia ridotta "
+          f"({n_combos} combinazioni specifica x modello).")
     real_spec_df, _, _, _ = run_specification_curve(
-        spec_grid=spec_grid, model_types=model_types, n_folds=n_folds
+        spec_grid=spec_grid, model_types=model_types, n_folds=n_folds, verbose=False
     )
     real_stat = _summarize_curve(real_spec_df["auc_pooled"], summary_stat)
     
     # Mappa i parametri scelti sui dati reali per tutte le configurazioni
     spec_keys = list(spec_grid.keys())
     fixed_params_dict = {}
-    for _, row in real_spec_df.iterrows():
+    for _, row in real_spec_df.iterrows(): #  method that loops through rows. 
+            # It yields a pair for each row: the row index and a Pandas Series with the row data.
         key = tuple(row[k] for k in spec_keys) + (row["model_type"],)
         fixed_params_dict[key] = row["best_params"]
         
@@ -385,7 +396,8 @@ def joint_significance_test(spec_grid=None, model_types=None, n_folds: int = 5,
         perm_spec_df, _, _, _ = run_specification_curve(
             spec_grid=spec_grid, model_types=model_types, n_folds=n_folds,
             permute_labels=True, random_state=perm_seed,
-            fixed_params_dict=fixed_params_dict
+            fixed_params_dict=fixed_params_dict,
+            verbose=False
         )
         null_stats[i] = _summarize_curve(perm_spec_df["auc_pooled"], summary_stat)
         if (i + 1) % 10 == 0:
