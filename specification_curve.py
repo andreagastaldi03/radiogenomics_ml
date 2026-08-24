@@ -150,7 +150,7 @@ def _cv_eval(X: pd.DataFrame, y_bin: pd.Series, model_type: str,
     coef_matrix = pd.concat(coef_frames, axis=1)
     coef_matrix.columns = [f"fold_{i}" for i in range(coef_matrix.shape[1])]
 
-    return float(np.mean(aucs)), float(np.std(aucs)), float(auc_pooled), coef_matrix
+    return float(np.mean(aucs)), float(np.std(aucs)), float(auc_pooled), coef_matrix, chosen_params
 
 
 def _feature_stats(coef_matrix: pd.DataFrame, model_type: str) -> pd.DataFrame:
