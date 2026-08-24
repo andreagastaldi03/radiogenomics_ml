@@ -33,7 +33,20 @@ SPEC_GRID = {
     "data_source": ["radiomics", "genomics", "both"],
     "gene_selection_method": ["variance", "iqr_top_pct", "iqr_top_n"],
     "exclude_shape": [True, False],
-    "redundancy_corr_threshold": [0.80, 0.90, 0.95],
+    "redundancy_corr_threshold": [0.90, 0.95],
+}
+
+# Griglia ridotta usata SOLO dal test di significatività congiunto
+# (joint_significance_test): la curva va rifatta N_PERMUTATIONS_SPEC_CURVE
+# volte, quindi qui si tiene solo un asse di scelte "extra" (gene_selection)
+# a 2 livelli invece di 3 e una sola soglia di ridondanza, mantenendo
+# comunque tutte e tre le sorgenti dati (è la scelta più rilevante per
+# l'interpretazione) ed entrambi i modelli.
+REDUCED_SPEC_GRID = {
+    "data_source": ["radiomics", "genomics", "both"],
+    "gene_selection_method": ["variance", "iqr_top_pct"],
+    "exclude_shape": [True, False],
+    "redundancy_corr_threshold": [0.90],
 }
 
 # i "due best" modelli: lineare interpretabile via coefficienti, e ad
@@ -133,8 +146,22 @@ def _feature_stats(coef_matrix: pd.DataFrame, model_type: str) -> pd.DataFrame:
 
 
 def run_specification_curve(spec_grid=None, model_types=None,
-                             n_folds: int = 5, top_n_features: int = 15):
+                             n_folds: int = 5, top_n_features: int = 15,
+                             permute_labels: bool = False,
+                             random_state: int = config.RANDOM_STATE):
     """
+    Parametri aggiuntivi
+    --------------------
+    permute_labels : se True, rimescola le etichette PRIMA di valutare
+        qualunque specifica. Usato dal test di significatività congiunto
+        (joint_significance_test) per costruire la distribuzione nulla:
+        una singola permutazione per data_source viene fissata all'inizio
+        di questa chiamata e riusata per TUTTE le combinazioni di quella
+        sorgente, così la curva permutata è confrontabile con quella reale
+        (stessa struttura, solo etichette senza informazione).
+    random_state : seed per la permutazione delle etichette (ignorato se
+        permute_labels=False).
+
     Ritorna
     -------
     spec_df : una riga per ogni combinazione (specifica x modello), con
@@ -155,6 +182,10 @@ def run_specification_curve(spec_grid=None, model_types=None,
     combos = list(itertools.product(*spec_grid.values()))
 
     cache_raw = {}
+    
+    permuted_y_cache = {}  # data_source -> y_bin permutata 
+    perm_rng = np.random.RandomState(random_state) if permute_labels else None
+
     spec_rows = []
     feature_votes = pd.Series(dtype=float)
     feature_votes_by_model = {m: pd.Series(dtype=float) for m in model_types}
@@ -174,6 +205,17 @@ def run_specification_curve(spec_grid=None, model_types=None,
             redundancy_corr_threshold=spec["redundancy_corr_threshold"],
         )
         y_bin = (y == config.POSITIVE_CLASS).astype(int)
+        
+        if permute_labels:
+            if spec["data_source"] not in permuted_y_cache:
+                # permuto i VALORI mantenendo l'indice/ordine dei pazienti invariato,
+                # cosi' resta allineato riga-per-riga con X_reduced per qualunque 
+                # spec di questa stessa data_source
+                shuffled_values = perm_rng.permutation(y_bin.to_numpy())
+                permuted_y_cache[spec["data_source"]] = pd.Series(shuffled_values,
+                                                                  index=y_bin.index)
+            y_bin = permuted_y_cache[spec["data_source"]]
+
 
         for model_type in model_types:
             #print(f"[specification_curve] {spec} | model={model_type}")
@@ -221,6 +263,118 @@ def run_specification_curve(spec_grid=None, model_types=None,
 
     return spec_df, feature_votes, feature_votes_by_model, feature_stats_long_df
 
+# ---------------------------------------------------------------------------
+# TEST DI SIGNIFICATIVITÀ CONGIUNTO (parte inferenziale della SCA)
+#
+# La curva descrittiva (run_specification_curve) risponde a "come cambia il
+# risultato al variare delle scelte metodologiche?". Questa funzione risponde
+# a una domanda diversa e più severa: "il pattern di risultati attraverso
+# tutte le specifiche insieme è più forte di quanto ci si aspetterebbe per
+# puro caso?" — permutando le etichette e rifacendo l'intera curva molte
+# volte (Simonsohn, Simmons & Nelson 2020).
+# ---------------------------------------------------------------------------
+def _summarize_curve(auc_pooled: pd.Series, stat: str) -> float:
+    """
+    Statistica riassuntiva di una curva di specifiche (una per permutazione + una reale).
+    """
+    if stat == "median":
+        return float(auc_pooled.median())
+    elif stat == "mean":
+        return float(auc_pooled.mean())
+    else:
+        raise ValueError(f"summary_stat '{stat}' non valida (usa 'median' o 'mean')")
+ 
+ 
+def joint_significance_test(spec_grid=None, model_types=None, n_folds: int = 5,
+                             n_permutations: int = None, summary_stat: str = None,
+                             random_state: int = config.RANDOM_STATE):
+    """
+    Costruisce la distribuzione nulla della specification curve permutando
+    le etichette e rifacendo l'INTERA curva n_permutations volte, poi
+    confronta la statistica riassuntiva (mediana o media di auc_pooled) della
+    curva reale con quella distribuzione.
+ 
+    Per costo computazionale usa di default REDUCED_SPEC_GRID invece di
+    SPEC_GRID: sia la curva reale sia tutte le curve permutate vengono
+    valutate sulla STESSA griglia ridotta, altrimenti il confronto tra
+    statistica reale e nulla non sarebbe corretto (griglie diverse
+    produrrebbero curve non comparabili).
+ 
+    Ritorna
+    -------
+    real_spec_df : la curva reale (sulla griglia usata per il test, non
+        necessariamente la stessa di run_specification_curve.py)
+    real_stat : statistica riassuntiva osservata
+    null_stats : array (n_permutations,) con la statistica per ogni curva permutata
+    p_value : frazione di curve permutate con statistica >= a quella osservata
+        (+1 correzione, come in diagnostics.permutation_test)
+    """
+    spec_grid = spec_grid or REDUCED_SPEC_GRID
+    model_types = model_types or MODEL_TYPES
+    n_permutations = n_permutations or config.N_PERMUTATIONS_SPEC_CURVE
+    summary_stat = summary_stat or config.SPEC_CURVE_SUMMARY_STAT
+ 
+    n_combos = len(list(itertools.product(*spec_grid.values()))) * len(model_types)
+    print(f"[joint_significance_test] curva REALE su griglia ridotta "
+          f"({n_combos} combinazioni specifica x modello)...")
+    real_spec_df, _, _, _ = run_specification_curve(
+        spec_grid=spec_grid, model_types=model_types, n_folds=n_folds
+    )
+    real_stat = _summarize_curve(real_spec_df["auc_pooled"], summary_stat)
+    print(f"[joint_significance_test] statistica riassuntiva REALE "
+          f"({summary_stat} di auc_pooled) = {real_stat:.4f}")
+ 
+    print(f"[joint_significance_test] {n_permutations} permutazioni x {n_combos} "
+          f"combinazioni = {n_permutations * n_combos} fit totali, può richiedere tempo...")
+ 
+    rng = np.random.RandomState(random_state)
+    null_stats = np.empty(n_permutations)
+    for i in range(n_permutations):
+        perm_seed = rng.randint(0, 1_000_000)
+        perm_spec_df, _, _, _ = run_specification_curve(
+            spec_grid=spec_grid, model_types=model_types, n_folds=n_folds,
+            permute_labels=True, random_state=perm_seed
+        )
+        null_stats[i] = _summarize_curve(perm_spec_df["auc_pooled"], summary_stat)
+        if (i + 1) % 10 == 0:
+            print(f"[joint_significance_test] {i+1}/{n_permutations} permutazioni completate")
+ 
+    # p-value empirico: quante curve permutate hanno fatto MEGLIO o UGUALE alla curva reale
+    p_value = (np.sum(null_stats >= real_stat) + 1) / (n_permutations + 1)
+ 
+    print(f"\n[joint_significance_test] {summary_stat} nullo (permutato): "
+          f"{null_stats.mean():.4f} ± {null_stats.std():.4f}")
+    print(f"[joint_significance_test] {summary_stat} osservato: {real_stat:.4f}")
+    print(f"[joint_significance_test] p-value empirico: {p_value:.4f}")
+ 
+    if p_value >= 0.05:
+        print("[joint_significance_test] ATTENZIONE: il pattern di risultati attraverso TUTTE "
+              "le specifiche non si distingue in modo significativo da quello ottenibile "
+              "permutando le etichette. Il segnale complessivo va trattato con forte cautela, "
+              "anche se qualche singola specifica individuale sembrava promettente.")
+    else:
+        print("[joint_significance_test] Il pattern di risultati attraverso le specifiche è "
+              "più forte di quanto atteso per puro caso: evidenza congiunta di segnale reale, "
+              "più robusta di un singolo permutation test su un solo modello.")
+ 
+    return real_spec_df, real_stat, null_stats, p_value
+ 
+    
+def plot_joint_significance_test(null_stats: np.ndarray, real_stat: float, summary_stat: str, output_path):
+    """Istogramma della distribuzione nulla della statistica riassuntiva, con la statistica osservata."""
+    plt.figure(figsize=(7, 5))
+    plt.hist(null_stats, bins=20, color="#8C8C8C", edgecolor="white",
+              label="curve con etichette permutate")
+    plt.axvline(real_stat, color="#C44E52", linewidth=2,
+                label=f"{summary_stat} osservato = {real_stat:.3f}")
+    plt.xlabel(f"{summary_stat} di auc_pooled attraverso le specifiche")
+    plt.ylabel("Numero di permutazioni")
+    plt.title("Test di significatività congiunto sulla specification curve")
+    plt.legend()
+    plt.tight_layout()
+    plt.savefig(output_path, dpi=150, bbox_inches="tight")
+    plt.close()
+    print(f"[plot_joint_significance_test] salvato in {output_path}")
 
 # ---------------------------------------------------------------------------
 # PLOT
