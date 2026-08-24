@@ -31,7 +31,8 @@ def normalize_id(patient_id):
     # match.group(0) ritorna la completa frase che ha matchato la ricerca
     # .strips() rimuove spazi bianchi e gap nel testo, restituendo una stringa più pulita possibile
 
-def load_data(source: str = "both"):
+def load_data(source: str = "both",
+              print_info: bool = True):
     """
     Carica radiomica/genomica/entrambe e le allinea alla label per patient_id.
 
@@ -103,16 +104,16 @@ def load_data(source: str = "both"):
     # Controllo di integrità
     assert X.shape[0] == y.shape[0], "Errore critico: Disallineamento tra feature e label dopo il merge."
         # esatto numero di paz per X e y
-    
-    print(f"--- [load_data] completato ---")
-    print(f"Source richiesto  : {source.upper()}")
-    print(f"Pazienti allineati: {X.shape[0]}")
-    print(f"Predittori totali : {X.shape[1]}")
-    print(f"Distribuzione     :\n{y.value_counts().to_string()}\n")
+    if print_info:
+        print(f"--- [load_data] completato ---")
+        print(f"Source richiesto  : {source.upper()}")
+        print(f"Pazienti allineati: {X.shape[0]}")
+        print(f"Predittori totali : {X.shape[1]}")
+        print(f"Distribuzione     :\n{y.value_counts().to_string()}\n")
 
     return X, y
 
-def load_batch_column(patient_index, batch_col: str = None):
+def load_batch_column(patient_index, batch_col: str = None, print_info: bool = True):
     """
     Carica (se disponibile) una colonna di "batch" tecnico dal file dei
     metadati (Tabella_di_conversione_completa.xlsx), allineata all'indice
@@ -145,15 +146,17 @@ def load_batch_column(patient_index, batch_col: str = None):
     labels_raw['ID_Normalizzato'] = labels_raw[config.ID_COL].apply(normalize_id)
     batch = labels_raw.set_index('ID_Normalizzato')[batch_col].astype(str).str.strip()
     batch = batch.reindex(patient_index)
-
-    print(f"[load_batch_column] batch '{batch_col}' caricato per {batch.notna().sum()} "
-          f"pazienti su {len(patient_index)}. Valori distinti: {batch.value_counts().to_dict()}")
+    
+    if print_info:
+        print(f"[load_batch_column] batch '{batch_col}' caricato per {batch.notna().sum()} "
+              f"pazienti su {len(patient_index)}. Valori distinti: {batch.value_counts().to_dict()}")
     return batch
 
 # ---------------------------------------------------------------------------
 # FILTRO PER VARIANZA
 # ---------------------------------------------------------------------------
-def variance_filter(X: pd.DataFrame, threshold: float = config.VARIANCE_THRESHOLD) -> pd.DataFrame:
+def variance_filter(X: pd.DataFrame, threshold: float = config.VARIANCE_THRESHOLD,
+                    print_info: bool = True) -> pd.DataFrame:
     """
     Rimuove feature con varianza (calcolata su dati standardizzati per range)
     sotto soglia. Usa il coefficiente di variazione robusto per non favorire
@@ -167,7 +170,9 @@ def variance_filter(X: pd.DataFrame, threshold: float = config.VARIANCE_THRESHOL
     variances = X_norm.var(ddof=0) # calcola varianza, dividendo per N - ddof, usually 1.
     keep = variances[variances > threshold].index # confronto var con soglia, e ne tengo gli indici
 
-    print(f"[variance_filter] {X.shape[1]} -> {len(keep)} feature (soglia={threshold})")
+    if print_info:
+        print(f"[variance_filter] {X.shape[1]} -> {len(keep)} feature (soglia={threshold})")
+    
     return X[keep] # ritorna la matrice di input solo nelle colonne corrispondenti agli indici calc
                    # precedentemente
 
@@ -179,7 +184,7 @@ def redundancy_reduction(
     X: pd.DataFrame,
     corr_threshold: float = config.REDUNDANCY_CORR_THRESHOLD,
     method: str = config.REDUNDANCY_METHOD,
-) -> pd.DataFrame:
+    print_info: bool = True) -> pd.DataFrame:
     """
     Raggruppa feature altamente correlate tra loro (Spearman di default) e
     tiene un solo rappresentante per cluster (quello con varianza maggiore,
@@ -221,10 +226,12 @@ def redundancy_reduction(
             best = X[cols].var().idxmax()
             representatives.append(best)
 
-    print(
-        f"[redundancy_reduction] {X.shape[1]} -> {len(representatives)} feature "
-        f"(clustering su corr {method}, soglia={corr_threshold})"
-    )
+    if print_info:
+        print(
+            f"[redundancy_reduction] {X.shape[1]} -> {len(representatives)} feature "
+            f"(clustering su corr {method}, soglia={corr_threshold})"
+        )
+        
     return X[representatives]
 
 # .groupby() su un oggetto indicando se stesso come argomento (clusters.groupby(clusters)), raggruppa 
@@ -236,7 +243,7 @@ def redundancy_reduction(
 # ---------------------------------------------------------------------------
 # SELEZIONE GENI ALTERNATIVA (IQR) — studio statistico pregresso
 # ---------------------------------------------------------------------------
-def select_genes(X_genes: pd.DataFrame, method: str = None) -> pd.DataFrame:
+def select_genes(X_genes: pd.DataFrame, method: str = None, print_info: bool = True) -> pd.DataFrame:
     """
     sceglie quali geni tenere. Il metodo "variance" (di default) butta via i 
     geni troppo "piatti" (che non cambiano quasi mai tra pazienti). I metodi 
@@ -269,7 +276,9 @@ def select_genes(X_genes: pd.DataFrame, method: str = None) -> pd.DataFrame:
             f"'iqr_top_n', 'iqr_top_pct' o 'iqr_threshold'."
         )
 
-    print(f"[select_genes] metodo={method}: {X_genes.shape[1]} -> {len(keep)} geni")
+    if print_info:
+        print(f"[select_genes] metodo={method}: {X_genes.shape[1]} -> {len(keep)} geni")
+    
     return X_genes[keep]
 
 
@@ -288,7 +297,8 @@ def is_shape_column(colname: str) -> bool:
 def neutral_feature_reduction(X: pd.DataFrame,
                                gene_selection_method: str = None,
                                exclude_shape: bool = None,
-                               redundancy_corr_threshold: float = None) -> pd.DataFrame:
+                               redundancy_corr_threshold: float = None,
+                               print_info: bool = True) -> pd.DataFrame:
     """
     riduce il numero di colonne prima di qualsiasi modello, senza mai guardare 
     l'etichetta ADK/SCC. Ora radiomica e genomica vengono ridotte SEPARATAMENTE 
@@ -319,33 +329,45 @@ def neutral_feature_reduction(X: pd.DataFrame,
         if exclude_shape:
             shape_cols = [c for c in rad_cols if is_shape_column(c)]
             nonshape_cols = [c for c in rad_cols if c not in shape_cols]
-            print(f"[neutral_feature_reduction] radiomica: {len(nonshape_cols)} "
-                  f"feature di texture/intensità, {len(shape_cols)} feature di forma "
-                  f"(ridotte separatamente)")
+            if print_info:
+                print(f"[neutral_feature_reduction] radiomica: {len(nonshape_cols)} "
+                      f"feature di texture/intensità, {len(shape_cols)} feature di forma "
+                      f"(ridotte separatamente)")
 
             if nonshape_cols:
-                X_nonshape_reduced = redundancy_reduction(variance_filter(X[nonshape_cols]),
-                                                          corr_threshold=redundancy_corr_threshold)
+                X_nonshape_reduced = redundancy_reduction(
+                    variance_filter(X[nonshape_cols], print_info=print_info),
+                    corr_threshold=redundancy_corr_threshold,
+                    print_info=print_info
+                )
                 pieces.append(X_nonshape_reduced)
             if shape_cols:
-                X_shape_reduced = redundancy_reduction(variance_filter(X[shape_cols]),
-                                                       corr_threshold=redundancy_corr_threshold)
+                X_shape_reduced = redundancy_reduction(
+                    variance_filter(X[shape_cols], print_info=print_info),
+                    corr_threshold=redundancy_corr_threshold,
+                    print_info=print_info
+                )
                 pieces.append(X_shape_reduced)
         else:
-            pieces.append(redundancy_reduction(variance_filter(X[rad_cols]), 
-                                               corr_threshold=redundancy_corr_threshold))
+            pieces.append(redundancy_reduction(
+                variance_filter(X[rad_cols], print_info=print_info), 
+                corr_threshold=redundancy_corr_threshold,
+                print_info=print_info
+            ))
 
     # --- Blocco genomico ---
     if gen_cols:
-        X_gen_selected = select_genes(X[gen_cols], method=gene_selection_method)
-        X_gen_reduced = redundancy_reduction(X_gen_selected, corr_threshold=redundancy_corr_threshold)
+        X_gen_selected = select_genes(X[gen_cols], method=gene_selection_method, print_info=print_info)
+        X_gen_reduced = redundancy_reduction(X_gen_selected, corr_threshold=redundancy_corr_threshold,
+                                             print_info=print_info)
         pieces.append(X_gen_reduced)
 
     if not pieces:
         raise ValueError("[neutral_feature_reduction] Nessuna colonna rad__ o gen__ trovata in X.")
 
     X_reduced = pd.concat(pieces, axis=1)
-    print(f"[neutral_feature_reduction] TOTALE: {X.shape[1]} -> {X_reduced.shape[1]} feature")
+    if print_info:
+        print(f"[neutral_feature_reduction] TOTALE: {X.shape[1]} -> {X_reduced.shape[1]} feature")
     return X_reduced
 
 

@@ -20,8 +20,9 @@ from sklearn.model_selection import StratifiedKFold
 from sklearn.metrics import roc_auc_score
 from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import StandardScaler
-from sklearn.linear_model import LogisticRegressionCV
+from sklearn.linear_model import LogisticRegressionCV, LogisticRegression
 from sklearn.ensemble import RandomForestClassifier
+from collections import Counter
 
 import config
 import data_utils
@@ -55,18 +56,30 @@ REDUCED_SPEC_GRID = {
 MODEL_TYPES = ["linear", "tree"]
 
 
-def _build_pipe(model_type: str):
+def _build_pipe(model_type: str, fixed_params: dict = None):
     if model_type == "linear":
-        return Pipeline([
-            ("scaler", StandardScaler()),
-            ("clf", LogisticRegressionCV(
-                penalty="elasticnet", solver="saga", max_iter=5000,
-                Cs=[0.01, 0.05, 0.1, 0.5, 1.0, 5.0],
-                l1_ratios=[0.1, 0.3, 0.5, 0.7, 0.9],
-                cv=3, scoring="roc_auc", 
-                random_state=config.RANDOM_STATE
-            )),
-        ])
+        if fixed_params:
+            # Usa iperparametri congelati (nessun tuning)
+            return Pipeline([
+                ("scaler", StandardScaler()),
+                ("clf", LogisticRegression(
+                    penalty="elasticnet", solver="saga", max_iter=5000,
+                    C=fixed_params["C"], l1_ratio=fixed_params["l1_ratio"],
+                    random_state=config.RANDOM_STATE
+                )),
+            ])
+        else: 
+            # tuning
+            return Pipeline([
+                ("scaler", StandardScaler()),
+                ("clf", LogisticRegressionCV(
+                    penalty="elasticnet", solver="saga", max_iter=5000,
+                    Cs=[0.01, 0.05, 0.1, 0.5, 1.0, 5.0],
+                    l1_ratios=[0.1, 0.3, 0.5, 0.7, 0.9],
+                    cv=3, scoring="roc_auc", 
+                    random_state=config.RANDOM_STATE
+                )),
+            ])
     elif model_type == "tree":
         return Pipeline([
             ("clf", RandomForestClassifier(
@@ -92,7 +105,8 @@ def _extract_importance(fitted_pipe, model_type: str, columns) -> pd.Series:
 
 
 def _cv_eval(X: pd.DataFrame, y_bin: pd.Series, model_type: str,
-             n_folds: int = 5, random_state: int = config.RANDOM_STATE):
+             n_folds: int = 5, random_state: int = config.RANDOM_STATE,
+             fixed_params: dict = None):
     """
     k-fold CV semplice per una specifica + un modello. Ritorna:
     - auc_mean, auc_sd: media/sd dell'AUC calcolata fold per fold
@@ -104,15 +118,33 @@ def _cv_eval(X: pd.DataFrame, y_bin: pd.Series, model_type: str,
     aucs = []
     coef_frames = []
     oof_proba = np.full(len(X), np.nan)
+    
+    fold_params = []
 
     for train_idx, test_idx in cv.split(X, y_bin):
         pipe = _build_pipe(model_type)
         pipe.fit(X.iloc[train_idx], y_bin.iloc[train_idx])
         proba = pipe.predict_proba(X.iloc[test_idx])[:, 1]
+        
+        if model_type == "linear" and fixed_params is None:
+            clf = pipe.named_steps["clf"]
+            fold_params.append({
+                "C": float(clf.C_[0]),
+                "l1_ratio": float(clf.l1_ratio_[0])
+            })
 
         aucs.append(roc_auc_score(y_bin.iloc[test_idx], proba))
         oof_proba[test_idx] = proba
         coef_frames.append(_extract_importance(pipe, model_type, X.columns))
+        
+    chosen_params = None
+    if model_type == "linear":
+        if fixed_params is None:
+            param_tuples = [tuple(sorted(p.items())) for p in fold_params]
+            most_common, _ = Counter(param_tuples).most_common(1)[0]
+            chosen_params = dict(most_common)
+        else:
+            chosen_params = fixed_params
 
     auc_pooled = roc_auc_score(y_bin, oof_proba)
     coef_matrix = pd.concat(coef_frames, axis=1)
@@ -148,7 +180,8 @@ def _feature_stats(coef_matrix: pd.DataFrame, model_type: str) -> pd.DataFrame:
 def run_specification_curve(spec_grid=None, model_types=None,
                              n_folds: int = 5, top_n_features: int = 15,
                              permute_labels: bool = False,
-                             random_state: int = config.RANDOM_STATE):
+                             random_state: int = config.RANDOM_STATE,
+                             fixed_params_dict: dict = None):
     """
     Parametri aggiuntivi
     --------------------
@@ -156,7 +189,7 @@ def run_specification_curve(spec_grid=None, model_types=None,
         qualunque specifica. Usato dal test di significatività congiunto
         (joint_significance_test) per costruire la distribuzione nulla:
         una singola permutazione per data_source viene fissata all'inizio
-        di questa chiamata e riusata per TUTTE le combinazioni di quella
+        di questa chiamata e riusata per tutte le combinazioni di quella
         sorgente, così la curva permutata è confrontabile con quella reale
         (stessa struttura, solo etichette senza informazione).
     random_state : seed per la permutazione delle etichette (ignorato se
@@ -195,7 +228,8 @@ def run_specification_curve(spec_grid=None, model_types=None,
         spec = dict(zip(keys, combo))
 
         if spec["data_source"] not in cache_raw:
-            cache_raw[spec["data_source"]] = data_utils.load_data(source=spec["data_source"])
+            cache_raw[spec["data_source"]] = data_utils.load_data(source=spec["data_source"], 
+                                                                  print_info = False)
         X_raw, y = cache_raw[spec["data_source"]]
 
         X_reduced = data_utils.neutral_feature_reduction(
@@ -203,12 +237,13 @@ def run_specification_curve(spec_grid=None, model_types=None,
             gene_selection_method=spec["gene_selection_method"],
             exclude_shape=spec["exclude_shape"],
             redundancy_corr_threshold=spec["redundancy_corr_threshold"],
+            print_info = False
         )
         y_bin = (y == config.POSITIVE_CLASS).astype(int)
         
         if permute_labels:
             if spec["data_source"] not in permuted_y_cache:
-                # permuto i VALORI mantenendo l'indice/ordine dei pazienti invariato,
+                # permuto i valori mantenendo l'indice/ordine dei pazienti invariato,
                 # cosi' resta allineato riga-per-riga con X_reduced per qualunque 
                 # spec di questa stessa data_source
                 shuffled_values = perm_rng.permutation(y_bin.to_numpy())
@@ -218,9 +253,17 @@ def run_specification_curve(spec_grid=None, model_types=None,
 
 
         for model_type in model_types:
-            #print(f"[specification_curve] {spec} | model={model_type}")
+            print(f"[specification_curve] {spec} | model={model_type}")
+            
+            spec_key = tuple(spec.values()) + (model_type,)
+            current_fixed_params = None
+            if fixed_params_dict is not None and spec_key in fixed_params_dict:
+                current_fixed_params = fixed_params_dict[spec_key]
+            
             auc_mean, auc_sd, auc_pooled, coef_matrix = _cv_eval(
-                X_reduced, y_bin, model_type, n_folds
+                X_reduced, y_bin, model_type, n_folds,
+                random_state=config.RANDOM_STATE,
+                fixed_params=current_fixed_params
             )
             fstats = _feature_stats(coef_matrix, model_type)
             
@@ -250,6 +293,7 @@ def run_specification_curve(spec_grid=None, model_types=None,
                 "auc_mean_fold": auc_mean, "auc_sd_fold": auc_sd,
                 "auc_pooled": auc_pooled, "n_features": X_reduced.shape[1],
                 "collapsed_model": collapsed,
+                "best_params": chosen_params
             })
 
     spec_df = pd.DataFrame(spec_rows).sort_values("auc_pooled").reset_index(drop=True)
@@ -296,9 +340,8 @@ def joint_significance_test(spec_grid=None, model_types=None, n_folds: int = 5,
  
     Per costo computazionale usa di default REDUCED_SPEC_GRID invece di
     SPEC_GRID: sia la curva reale sia tutte le curve permutate vengono
-    valutate sulla STESSA griglia ridotta, altrimenti il confronto tra
-    statistica reale e nulla non sarebbe corretto (griglie diverse
-    produrrebbero curve non comparabili).
+    valutate sulla stessa griglia ridotta, altrimenti il confronto tra
+    statistica reale e nulla non sarebbe corretto.
  
     Ritorna
     -------
@@ -315,25 +358,34 @@ def joint_significance_test(spec_grid=None, model_types=None, n_folds: int = 5,
     summary_stat = summary_stat or config.SPEC_CURVE_SUMMARY_STAT
  
     n_combos = len(list(itertools.product(*spec_grid.values()))) * len(model_types)
-    print(f"[joint_significance_test] curva REALE su griglia ridotta "
+    print(f"[joint_significance_test] curva reale su griglia ridotta "
           f"({n_combos} combinazioni specifica x modello)...")
     real_spec_df, _, _, _ = run_specification_curve(
         spec_grid=spec_grid, model_types=model_types, n_folds=n_folds
     )
     real_stat = _summarize_curve(real_spec_df["auc_pooled"], summary_stat)
-    print(f"[joint_significance_test] statistica riassuntiva REALE "
+    
+    # Mappa i parametri scelti sui dati reali per tutte le configurazioni
+    spec_keys = list(spec_grid.keys())
+    fixed_params_dict = {}
+    for _, row in real_spec_df.iterrows():
+        key = tuple(row[k] for k in spec_keys) + (row["model_type"],)
+        fixed_params_dict[key] = row["best_params"]
+        
+    print(f"[joint_significance_test] statistica riassuntiva reale "
           f"({summary_stat} di auc_pooled) = {real_stat:.4f}")
  
     print(f"[joint_significance_test] {n_permutations} permutazioni x {n_combos} "
-          f"combinazioni = {n_permutations * n_combos} fit totali, può richiedere tempo...")
+          f"combinazioni = {n_permutations * n_combos} fit totali.")
  
     rng = np.random.RandomState(random_state)
     null_stats = np.empty(n_permutations)
     for i in range(n_permutations):
-        perm_seed = rng.randint(0, 1_000_000)
+        perm_seed = rng.randint(0, 1000000)
         perm_spec_df, _, _, _ = run_specification_curve(
             spec_grid=spec_grid, model_types=model_types, n_folds=n_folds,
-            permute_labels=True, random_state=perm_seed
+            permute_labels=True, random_state=perm_seed,
+            fixed_params_dict=fixed_params_dict
         )
         null_stats[i] = _summarize_curve(perm_spec_df["auc_pooled"], summary_stat)
         if (i + 1) % 10 == 0:
@@ -348,10 +400,9 @@ def joint_significance_test(spec_grid=None, model_types=None, n_folds: int = 5,
     print(f"[joint_significance_test] p-value empirico: {p_value:.4f}")
  
     if p_value >= 0.05:
-        print("[joint_significance_test] ATTENZIONE: il pattern di risultati attraverso TUTTE "
+        print("[joint_significance_test] ATTENZIONE: il pattern di risultati attraverso tutte "
               "le specifiche non si distingue in modo significativo da quello ottenibile "
-              "permutando le etichette. Il segnale complessivo va trattato con forte cautela, "
-              "anche se qualche singola specifica individuale sembrava promettente.")
+              "permutando le etichette. Il segnale complessivo va trattato con forte cautela.")
     else:
         print("[joint_significance_test] Il pattern di risultati attraverso le specifiche è "
               "più forte di quanto atteso per puro caso: evidenza congiunta di segnale reale, "

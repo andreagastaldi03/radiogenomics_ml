@@ -103,7 +103,7 @@ EXCLUDE_SHAPE_FROM_MAIN_REDUCTION = True
 # TEST DI SIGNIFICATIVITÀ CONGIUNTO SULLA SPECIFICATION CURVE (permutazione)
 #
 # Parte "inferenziale" della specification curve analysis (Simonsohn et al.
-# 2020): si permutano le etichette e si rifà l'INTERA curva (tutte le
+# 2020): si permutano le etichette e si rifà l'intera curva (tutte le
 # specifiche) molte volte, poi si confronta una statistica riassuntiva della
 # curva reale con la distribuzione della stessa statistica sulle curve
 # permutate. Costoso (n_specifiche x N_PERMUTATIONS_SPEC_CURVE fit), quindi
@@ -113,4 +113,5 @@ EXCLUDE_SHAPE_FROM_MAIN_REDUCTION = True
 N_PERMUTATIONS_SPEC_CURVE = 100     # Simonsohn consiglia 500+, ma con n=54 e una
                                     # griglia di specifiche già 50-100 è un 
                                     # compromesso ragionevole
-SPEC_CURVE_SUMMARY_STAT = "median"  # statistica riassuntiva della curva: "median" o "mean" di auc_pooled
+SPEC_CURVE_SUMMARY_STAT = "median"  # statistica riassuntiva della curva: "median" 
+                                    # o "mean" di auc_pooled

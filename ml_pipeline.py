@@ -168,7 +168,7 @@ def majority_vote_params(best_params_list):
 
     Perché: la nested CV sceglie iperparametri potenzialmente diversi ad ogni
     fold esterno (normale, con n=54 il tuning è instabile). Per la stability
-    selection bootstrap serve UN solo set di iperparametri fissi (rifare un
+    selection bootstrap serve un solo set di iperparametri fissi (rifare un
     grid search dentro ognuno dei centinaia di bootstrap sarebbe troppo
     costoso e statisticamente ridondante). Il voto di maggioranza è un modo
     semplice e trasparente per sceglierli in modo data-driven, non arbitrario.
@@ -289,9 +289,7 @@ def run_all_models(X: pd.DataFrame, y: pd.Series):
 def compute_pooled_oof_metrics(results: dict, X: pd.DataFrame, y: pd.Series):
     """
     Calcola le metriche pooled out-of-fold usando le stesse predizioni
-    della nested CV esterna.
-
-    Non rifitta i modelli e non modifica gli split.
+    della nested CV esterna. Non rifitta i modelli e non modifica gli split.
 
     Per ogni outer fold:
         - recupera il modello già addestrato;
@@ -300,7 +298,6 @@ def compute_pooled_oof_metrics(results: dict, X: pd.DataFrame, y: pd.Series):
 
     Le predizioni vengono poi ricomposte per tutti i pazienti e
     utilizzate per calcolare:
-
         - pooled ROC-AUC
         - pooled balanced accuracy
         - pooled F1
@@ -318,16 +315,12 @@ def compute_pooled_oof_metrics(results: dict, X: pd.DataFrame, y: pd.Series):
     # Target binario
     # --------------------------------------------------------------
     y_bin = (y == config.POSITIVE_CLASS).astype(int)
-
     n_samples = len(X)
-
     # Probabilità predette
     oof_probability = np.full(n_samples, np.nan, dtype=float)
         # Return a new array of given shape and type, filled with fill_value.
-
     # Classe predetta
     oof_prediction = np.full(n_samples, -1, dtype=int)
-
     # Outer fold di appartenenza
     oof_fold = np.full(n_samples, -1, dtype=int)
 
@@ -341,13 +334,10 @@ def compute_pooled_oof_metrics(results: dict, X: pd.DataFrame, y: pd.Series):
             # counter che inizia da 1 e non da zero
         test_idx = np.asarray(test_idx, dtype=int)
         X_test = X.iloc[test_idx]
-
         # Probabilità della classe positiva
         y_proba = fold_model.predict_proba(X_test)[:, 1]
-
         # Classe predetta dal modello.
         y_pred = fold_model.predict(X_test)
-
         # Convertiamo eventualmente le classi originali
         # nella codifica binaria 0/1.
         y_pred_bin = y_pred.astype(int)
@@ -358,8 +348,7 @@ def compute_pooled_oof_metrics(results: dict, X: pd.DataFrame, y: pd.Series):
         # ----------------------------------------------------------
         if np.any(~np.isnan(oof_probability[test_idx])):
             raise RuntimeError(
-                f"Alcuni pazienti compaiono in più di un "
-                f"outer test fold (fold {fold_i})."
+                f"Alcuni pazienti compaiono in più di un outer test fold (fold {fold_i})."
             )
             # prende oof_prob e lo valuta in tutti gli indici di test, ~np.isnan restituisce 
             # true solo se NOT a NaN, any restituisce true solo se c'è almeno un true.
@@ -425,10 +414,9 @@ def bootstrap_pooled_auc_ci(y_true: np.ndarray, proba: np.ndarray,
     CI bootstrap (percentile, 95%) sulla AUC pooled out-of-fold.
  
     Ricampiona con reinserimento i pazienti dalle predizioni OOF già
-    salvate che sono già state calcolate da compute_pooled_oof_metrics). 
+    salvate (che sono già state calcolate da compute_pooled_oof_metrics). 
     Risponde alla domanda "quanto è incerta questa stima puntuale di 
-    AUC pooled, con n=54?" — un singolo numero come "AUC pooled = 0.543" 
-    nasconde quest'incertezza.
+    AUC pooled, con n=54?" — un singolo numero nasconde quest'incertezza.
  
     Parametri
     ---------
@@ -619,8 +607,10 @@ def run_pooled_oof_analysis(all_results: dict, X: pd.DataFrame, y: pd.Series, ou
 # STABILITY SELECTION (bootstrap) — quali feature emergono ripetutamente
 # ---------------------------------------------------------------------------
 def _bootstrap_importance(pipe, X_boot, y_boot, model_type) -> pd.Series:
-    """Importanza delle feature per un bootstrap, in scala comparabile tra modelli:
-    valore assoluto del coefficiente per i lineari, feature_importances_ per gli alberi."""
+    """
+    Importanza delle feature per un bootstrap, in scala comparabile tra modelli:
+    valore assoluto del coefficiente per i lineari, feature_importances_ per gli alberi.
+    """
     pipe.fit(X_boot, y_boot)
     clf = pipe.named_steps["clf"]
     if model_type == "linear":

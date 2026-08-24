@@ -7,8 +7,8 @@ def main(run_joint_test: bool = True):
     spec_df, feature_votes, feature_votes_by_model, feature_stats_long_df = sc.run_specification_curve()
 
     spec_df.to_csv(config.OUTPUT_DIR / "specification_curve_results.csv", index=False)
-    feature_votes.to_csv(config.OUTPUT_DIR / "feature_votes_across_specs.csv",
-                          header=["n_specs_selected"])
+    feature_votes.to_csv(config.OUTPUT_DIR / "feature_votes_across_specs.csv",    
+                         header=["n_specs_selected"])
     feature_stats_long_df.to_csv(config.OUTPUT_DIR / "feature_stats_per_spec_long.csv", index=False)
 
     n_specs_per_model = spec_df.groupby("model_type").size()

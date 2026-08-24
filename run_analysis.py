@@ -47,13 +47,13 @@ def main():
     # ------------------------------------------------------------------
     # 1) Caricamento dati
     # ------------------------------------------------------------------
-    X, y = data_utils.load_data(source=config.DATA_SOURCE)
+    X, y = data_utils.load_data(source=config.DATA_SOURCE, print_info = True)
     X.to_csv(run_output_dir / "X_features.csv")
 
     # ------------------------------------------------------------------
     # 2) Riduzione feature neutra (NON guarda la label)
     # ------------------------------------------------------------------
-    X_reduced = data_utils.neutral_feature_reduction(X)
+    X_reduced = data_utils.neutral_feature_reduction(X, print_info = True)
     X_reduced.to_csv(run_output_dir / "X_reduced_features.csv")
 
     # ------------------------------------------------------------------
