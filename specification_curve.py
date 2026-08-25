@@ -22,6 +22,7 @@ from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import StandardScaler
 from sklearn.linear_model import LogisticRegressionCV, LogisticRegression
 from sklearn.ensemble import RandomForestClassifier
+from scipy.stats import binomtest
 from collections import Counter
 
 import config
@@ -337,7 +338,34 @@ def _summarize_curve(auc_pooled: pd.Series, stat: str) -> float:
         return float(auc_pooled.mean())
     else:
         raise ValueError(f"summary_stat '{stat}' non valida (usa 'median' o 'mean')")
+        
+        
+def _empirical_p_with_ci(null_stats: np.ndarray, real_stat: float, confidence_level: float = 0.95):
+    """
+    P-value empirico da permutazione + intervallo di confidenza sulla sua incertezza.
  
+    Il punto stimato usa la correzione standard (b+1)/(m+1) di Phipson & Smyth
+    (2010) — lo standard per evitare p=0 con un numero finito di permutazioni. 
+    Quello che un singolo numero non dice è quanto ci si può fidare di quella 
+    stima con un m piccolo: il conteggio "quante permutazioni >= al reale" è 
+    un conteggio binomiale, per cui possiamo chiedere a scipy l'intervallo di 
+    confidenza esatto (Clopper-Pearson) sulla vera proporzione. 
+    Con m piccolo questo intervallo sarà enorme — salire con N_PERMUTATIONS.
+ 
+    Ritorna
+    -------
+    p_value : stima puntuale, formula (b+1)/(m+1)
+    ci_low, ci_high : CI esatta (Clopper-Pearson) sulla proporzione b/m
+    n_successes : quante permutazioni hanno eguagliato/superato il reale (b)
+    """
+    m = len(null_stats)
+    b = int(np.sum(null_stats >= real_stat))
+    p_value = (b + 1) / (m + 1)
+    ci = binomtest(b, m, alternative="two-sided").proportion_ci(
+        confidence_level=confidence_level, method="exact"
+    )
+    return p_value, ci.low, ci.high, b
+
  
 def joint_significance_test(spec_grid=None, model_types=None, n_folds: int = 5,
                              n_permutations: int = None, summary_stat: str = None,
@@ -403,13 +431,20 @@ def joint_significance_test(spec_grid=None, model_types=None, n_folds: int = 5,
         if (i + 1) % 10 == 0:
             print(f"[joint_significance_test] {i+1}/{n_permutations} permutazioni completate")
  
-    # p-value empirico: quante curve permutate hanno fatto MEGLIO o UGUALE alla curva reale
-    p_value = (np.sum(null_stats >= real_stat) + 1) / (n_permutations + 1)
+    # p-value empirico (Phipson & Smyth) + CI esatta (Clopper-Pearson) sulla sua incertezza
+    p_value, p_ci_low, p_ci_high, n_successes = _empirical_p_with_ci(null_stats, real_stat)
  
     print(f"\n[joint_significance_test] {summary_stat} nullo (permutato): "
           f"{null_stats.mean():.4f} ± {null_stats.std():.4f}")
     print(f"[joint_significance_test] {summary_stat} osservato: {real_stat:.4f}")
-    print(f"[joint_significance_test] p-value empirico: {p_value:.4f}")
+    print(f"[joint_significance_test] p-value empirico: {p_value:.4f} "
+          f"({n_successes}/{n_permutations} permutazioni >= al reale) | "
+          f"CI 95% esatta (Clopper-Pearson): [{p_ci_low:.4f}, {p_ci_high:.4f}]")
+    
+    if p_ci_high - p_ci_low > 0.15:
+        print("[joint_significance_test] ATTENZIONE: il CI sul p-value è molto ampio — "
+              "con questo numero di permutazioni la stima è poco precisa, considera di "
+              "aumentare N_PERMUTATIONS_SPEC_CURVE prima di trarre conclusioni forti.")
  
     if p_value >= 0.05:
         print("[joint_significance_test] ATTENZIONE: il pattern di risultati attraverso tutte "
@@ -420,19 +455,160 @@ def joint_significance_test(spec_grid=None, model_types=None, n_folds: int = 5,
               "più forte di quanto atteso per puro caso: evidenza congiunta di segnale reale, "
               "più robusta di un singolo permutation test su un solo modello.")
  
-    return real_spec_df, real_stat, null_stats, p_value
+    return real_spec_df, real_stat, null_stats, p_value, p_ci_low, p_ci_high
+
+
+def joint_significance_test_source_comparison(source_a: str = "genomics", source_b: str = "both",
+                                                spec_grid=None, model_types=None, n_folds: int = 5,
+                                                n_permutations: int = None, summary_stat: str = None,
+                                                random_state: int = config.RANDOM_STATE):
+    """
+    Variante APPAIATA del test di significatività congiunto: non chiede "il
+    segnale è più forte del caso?" (joint_significance_test) ma "SOURCE_B
+    aggiunge sistematicamente segnale rispetto a SOURCE_A, attraverso TUTTE
+    le combinazioni della griglia di specifiche, più di quanto ci si
+    aspetterebbe permutando le etichette?". Generalizza il confronto singolo
+    di compare_data_sources.py (un solo modello, un solo preprocessing) a
+    tutta la griglia — risposta più robusta perché non dipende da una
+    scelta arbitraria di specifica.
+ 
+    Design appaiato (stessa logica di compare_data_sources.py):
+    - STESSI pazienti per le due sorgenti: dato che "both" è già
+      un'intersezione radiomica/genomica, i suoi pazienti sono un
+      sottoinsieme di quelli di "genomics" da sola — si usa quindi
+      l'intersezione (in pratica l'indice di source_b).
+    - STESSA permutazione delle etichette per le due sorgenti ad ogni
+      iterazione, e STESSA suddivisione in fold (stessi pazienti, stesso
+      random_state -> fold identici): così la differenza isola l'effetto
+      della sorgente dati, non il rumore di ricampionamento.
+    - Iperparametri lineari CONGELATI sulla curva reale e riusati identici
+      in tutte le permutazioni (stessa ottimizzazione di joint_significance_test).
+ 
+    Statistica: per ogni combinazione (spec x modello),
+    auc_pooled(source_b) - auc_pooled(source_a); la curva è la
+    mediana/media di queste differenze attraverso le specifiche.
+ 
+    Ritorna
+    -------
+    real_diff_df : DataFrame, una riga per specifica x modello, con
+        auc_pooled_a, auc_pooled_b, diff = auc_pooled_b - auc_pooled_a
+    real_stat, null_stats, p_value, p_ci_low, p_ci_high : come joint_significance_test
+    """
+    spec_grid = spec_grid or {k: v for k, v in REDUCED_SPEC_GRID.items() if k != "data_source"}
+    model_types = model_types or MODEL_TYPES
+    n_permutations = n_permutations or config.N_PERMUTATIONS_SPEC_CURVE
+    summary_stat = summary_stat or config.SPEC_CURVE_SUMMARY_STAT
+ 
+    # --- Allineamento pazienti tra le due sorgenti (confronto appaiato) ---
+    X_raw_a, y_a = data_utils.load_data(source=source_a, print_info=False)
+    X_raw_b, y_b = data_utils.load_data(source=source_b, print_info=False)
+    common_idx = X_raw_a.index.intersection(X_raw_b.index)
+    n_dropped = min(len(X_raw_a), len(X_raw_b)) - len(common_idx)
+    if n_dropped > 0:
+        print(f"[joint_significance_test_source_comparison] ATTENZIONE: {n_dropped} pazienti "
+              f"presenti in una sola delle due sorgenti sono stati esclusi dal confronto appaiato.")
+    X_raw_a = X_raw_a.loc[common_idx].sort_index()
+    X_raw_b = X_raw_b.loc[common_idx].sort_index()
+    y_a, y_b = y_a.loc[common_idx].sort_index(), y_b.loc[common_idx].sort_index()
+    if not y_a.equals(y_b):
+        raise RuntimeError("Le etichette non coincidono tra le due sorgenti per gli stessi pazienti: "
+                            "controlla l'allineamento in data_utils.load_data.")
+    y_bin_base = (y_a == config.POSITIVE_CLASS).astype(int)
+ 
+    keys = list(spec_grid.keys())
+    combos = list(itertools.product(*spec_grid.values()))
+    n_combos = len(combos) * len(model_types)
+ 
+    # Riduzione feature (indipendente dalla label): calcolata UNA SOLA VOLTA per
+    # ogni specifica e riusata identica per la curva reale e per tutte le
+    # permutazioni (non dipende in alcun modo dalle etichette).
+    reduction_cache_a, reduction_cache_b = {}, {}
+    for combo in combos:
+        spec = dict(zip(keys, combo))
+        reduction_cache_a[combo] = data_utils.neutral_feature_reduction(
+            X_raw_a, gene_selection_method=spec.get("gene_selection_method"),
+            exclude_shape=spec.get("exclude_shape"),
+            redundancy_corr_threshold=spec.get("redundancy_corr_threshold"),
+            print_info=False)
+        reduction_cache_b[combo] = data_utils.neutral_feature_reduction(
+            X_raw_b, gene_selection_method=spec.get("gene_selection_method"),
+            exclude_shape=spec.get("exclude_shape"),
+            redundancy_corr_threshold=spec.get("redundancy_corr_threshold"),
+            print_info=False)
+ 
+    def _one_diff_curve(y_bin, fixed_params_dict=None):
+        rows, params_out = [], {}
+        for combo in combos:
+            spec = dict(zip(keys, combo))
+            X_a, X_b = reduction_cache_a[combo], reduction_cache_b[combo]
+            for model_type in model_types:
+                spec_key = combo + (model_type,)
+                fp_a = fixed_params_dict.get((spec_key, "a")) if fixed_params_dict else None
+                fp_b = fixed_params_dict.get((spec_key, "b")) if fixed_params_dict else None
+                _, _, auc_pooled_a, _, chosen_a = _cv_eval(
+                    X_a, y_bin, model_type, n_folds, random_state=config.RANDOM_STATE, fixed_params=fp_a)
+                _, _, auc_pooled_b, _, chosen_b = _cv_eval(
+                    X_b, y_bin, model_type, n_folds, random_state=config.RANDOM_STATE, fixed_params=fp_b)
+                rows.append({**spec, "model_type": model_type,
+                             "auc_pooled_a": auc_pooled_a, "auc_pooled_b": auc_pooled_b,
+                             "diff": auc_pooled_b - auc_pooled_a})
+                params_out[(spec_key, "a")] = chosen_a
+                params_out[(spec_key, "b")] = chosen_b
+        return pd.DataFrame(rows), params_out
+ 
+    print(f"[joint_significance_test_source_comparison] curva reale ({source_b} - {source_a}) "
+          f"su {n_combos} combinazioni specifica x modello...")
+    real_diff_df, fixed_params_dict = _one_diff_curve(y_bin_base, fixed_params_dict=None)
+    real_stat = _summarize_curve(real_diff_df["diff"], summary_stat)
+    print(f"[joint_significance_test_source_comparison] {summary_stat} osservato della differenza "
+          f"({source_b} - {source_a}) = {real_stat:+.4f}")
+    print(f"[joint_significance_test_source_comparison] {n_permutations} permutazioni x {n_combos} "
+          f"combinazioni x 2 sorgenti.")
+ 
+    rng = np.random.RandomState(random_state)
+    null_stats = np.empty(n_permutations)
+    for i in range(n_permutations):
+        perm_seed = rng.randint(0, 1_000_000)
+        prng = np.random.RandomState(perm_seed)
+        y_bin_perm = pd.Series(prng.permutation(y_bin_base.to_numpy()), index=y_bin_base.index)
+        perm_diff_df, _ = _one_diff_curve(y_bin_perm, fixed_params_dict=fixed_params_dict)
+        null_stats[i] = _summarize_curve(perm_diff_df["diff"], summary_stat)
+        if (i + 1) % 10 == 0:
+            print(f"[joint_significance_test_source_comparison] {i+1}/{n_permutations} permutazioni completate")
+ 
+    p_value, p_ci_low, p_ci_high, n_successes = _empirical_p_with_ci(null_stats, real_stat)
+ 
+    print(f"\n[joint_significance_test_source_comparison] {summary_stat} nullo (permutato): "
+          f"{null_stats.mean():+.4f} ± {null_stats.std():.4f}")
+    print(f"[joint_significance_test_source_comparison] {summary_stat} osservato: {real_stat:+.4f}")
+    print(f"[joint_significance_test_source_comparison] p-value empirico: {p_value:.4f} "
+          f"({n_successes}/{n_permutations} permutazioni >= al reale) | "
+          f"CI 95% esatta: [{p_ci_low:.4f}, {p_ci_high:.4f}]")
+ 
+    if p_value >= 0.05:
+        print(f"[joint_significance_test_source_comparison] ATTENZIONE: non c'è evidenza congiunta "
+              f"(attraverso le specifiche testate) che {source_b} aggiunga segnale rispetto a "
+              f"{source_a}. Coerente con quanto già visto in compare_data_sources.py, ma qui su "
+              f"più scelte di preprocessing insieme.")
+    else:
+        print(f"[joint_significance_test_source_comparison] Evidenza congiunta che {source_b} "
+              f"aggiunge segnale reale rispetto a {source_a}, robusta attraverso le scelte di "
+              f"preprocessing testate — più forte di un singolo confronto DeLong/bootstrap.")
+ 
+    return real_diff_df, real_stat, null_stats, p_value, p_ci_low, p_ci_high
  
     
-def plot_joint_significance_test(null_stats: np.ndarray, real_stat: float, summary_stat: str, output_path):
+def plot_joint_significance_test(null_stats: np.ndarray, real_stat: float, summary_stat: str,
+                                 output_path, xlabel: str = None, title: str = None):
     """Istogramma della distribuzione nulla della statistica riassuntiva, con la statistica osservata."""
     plt.figure(figsize=(7, 5))
     plt.hist(null_stats, bins=20, color="#8C8C8C", edgecolor="white",
               label="curve con etichette permutate")
     plt.axvline(real_stat, color="#C44E52", linewidth=2,
                 label=f"{summary_stat} osservato = {real_stat:.3f}")
-    plt.xlabel(f"{summary_stat} di auc_pooled attraverso le specifiche")
+    plt.xlabel(xlabel or f"{summary_stat} di auc_pooled attraverso le specifiche")
     plt.ylabel("Numero di permutazioni")
-    plt.title("Test di significatività congiunto sulla specification curve")
+    plt.title(title or "Test di significatività congiunto sulla specification curve")
     plt.legend()
     plt.tight_layout()
     plt.savefig(output_path, dpi=150, bbox_inches="tight")
