@@ -463,9 +463,9 @@ def joint_significance_test_source_comparison(source_a: str = "genomics", source
                                                 n_permutations: int = None, summary_stat: str = None,
                                                 random_state: int = config.RANDOM_STATE):
     """
-    Variante APPAIATA del test di significatività congiunto: non chiede "il
+    Variante appaiata del test di significatività congiunto: non chiede "il
     segnale è più forte del caso?" (joint_significance_test) ma "SOURCE_B
-    aggiunge sistematicamente segnale rispetto a SOURCE_A, attraverso TUTTE
+    aggiunge sistematicamente segnale rispetto a SOURCE_A, attraverso tutte
     le combinazioni della griglia di specifiche, più di quanto ci si
     aspetterebbe permutando le etichette?". Generalizza il confronto singolo
     di compare_data_sources.py (un solo modello, un solo preprocessing) a
@@ -473,16 +473,16 @@ def joint_significance_test_source_comparison(source_a: str = "genomics", source
     scelta arbitraria di specifica.
  
     Design appaiato (stessa logica di compare_data_sources.py):
-    - STESSI pazienti per le due sorgenti: dato che "both" è già
+    - stessi pazienti per le due sorgenti: dato che "both" è già
       un'intersezione radiomica/genomica, i suoi pazienti sono un
       sottoinsieme di quelli di "genomics" da sola — si usa quindi
-      l'intersezione (in pratica l'indice di source_b).
-    - STESSA permutazione delle etichette per le due sorgenti ad ogni
-      iterazione, e STESSA suddivisione in fold (stessi pazienti, stesso
+      l'intersezione.
+    - stessa permutazione delle etichette per le due sorgenti ad ogni
+      iterazione, e stessa suddivisione in fold (stessi pazienti, stesso
       random_state -> fold identici): così la differenza isola l'effetto
       della sorgente dati, non il rumore di ricampionamento.
-    - Iperparametri lineari CONGELATI sulla curva reale e riusati identici
-      in tutte le permutazioni (stessa ottimizzazione di joint_significance_test).
+    - Iperparametri lineari congelati sulla curva reale e riusati identici
+      in tutte le permutazioni.
  
     Statistica: per ogni combinazione (spec x modello),
     auc_pooled(source_b) - auc_pooled(source_a); la curva è la
@@ -495,6 +495,8 @@ def joint_significance_test_source_comparison(source_a: str = "genomics", source
     real_stat, null_stats, p_value, p_ci_low, p_ci_high : come joint_significance_test
     """
     spec_grid = spec_grid or {k: v for k, v in REDUCED_SPEC_GRID.items() if k != "data_source"}
+        # .items() prende tutte le coppie chiave (k) e valore (v), ricostruisce un dict escludendo
+        # la chiave "data_source"
     model_types = model_types or MODEL_TYPES
     n_permutations = n_permutations or config.N_PERMUTATIONS_SPEC_CURVE
     summary_stat = summary_stat or config.SPEC_CURVE_SUMMARY_STAT
@@ -505,7 +507,7 @@ def joint_significance_test_source_comparison(source_a: str = "genomics", source
     common_idx = X_raw_a.index.intersection(X_raw_b.index)
     n_dropped = min(len(X_raw_a), len(X_raw_b)) - len(common_idx)
     if n_dropped > 0:
-        print(f"[joint_significance_test_source_comparison] ATTENZIONE: {n_dropped} pazienti "
+        print(f"\n[joint_significance_test_source_comparison] ATTENZIONE: {n_dropped} pazienti "
               f"presenti in una sola delle due sorgenti sono stati esclusi dal confronto appaiato.")
     X_raw_a = X_raw_a.loc[common_idx].sort_index()
     X_raw_b = X_raw_b.loc[common_idx].sort_index()
@@ -516,10 +518,12 @@ def joint_significance_test_source_comparison(source_a: str = "genomics", source
     y_bin_base = (y_a == config.POSITIVE_CLASS).astype(int)
  
     keys = list(spec_grid.keys())
-    combos = list(itertools.product(*spec_grid.values()))
+    combos = list(itertools.product(*spec_grid.values())) 
+        # itertools.product(...): funzione del modulo itertools che genera le combinazioni fra gli 
+        # elementi degli iterabili passati
     n_combos = len(combos) * len(model_types)
  
-    # Riduzione feature (indipendente dalla label): calcolata UNA SOLA VOLTA per
+    # Riduzione feature (indipendente dalla label): calcolata una sola volta per
     # ogni specifica e riusata identica per la curva reale e per tutte le
     # permutazioni (non dipende in alcun modo dalle etichette).
     reduction_cache_a, reduction_cache_b = {}, {}
@@ -545,6 +549,7 @@ def joint_significance_test_source_comparison(source_a: str = "genomics", source
                 spec_key = combo + (model_type,)
                 fp_a = fixed_params_dict.get((spec_key, "a")) if fixed_params_dict else None
                 fp_b = fixed_params_dict.get((spec_key, "b")) if fixed_params_dict else None
+                    # cerca un oggetto della forma (chiave, "a/b") nel dict dei param
                 _, _, auc_pooled_a, _, chosen_a = _cv_eval(
                     X_a, y_bin, model_type, n_folds, random_state=config.RANDOM_STATE, fixed_params=fp_a)
                 _, _, auc_pooled_b, _, chosen_b = _cv_eval(
@@ -556,8 +561,8 @@ def joint_significance_test_source_comparison(source_a: str = "genomics", source
                 params_out[(spec_key, "b")] = chosen_b
         return pd.DataFrame(rows), params_out
  
-    print(f"[joint_significance_test_source_comparison] curva reale ({source_b} - {source_a}) "
-          f"su {n_combos} combinazioni specifica x modello...")
+    print(f"\n[joint_significance_test_source_comparison] curva reale ({source_b} - {source_a}) "
+          f"su {n_combos} combinazioni specifica x modello.")
     real_diff_df, fixed_params_dict = _one_diff_curve(y_bin_base, fixed_params_dict=None)
     real_stat = _summarize_curve(real_diff_df["diff"], summary_stat)
     print(f"[joint_significance_test_source_comparison] {summary_stat} osservato della differenza "
@@ -568,7 +573,7 @@ def joint_significance_test_source_comparison(source_a: str = "genomics", source
     rng = np.random.RandomState(random_state)
     null_stats = np.empty(n_permutations)
     for i in range(n_permutations):
-        perm_seed = rng.randint(0, 1_000_000)
+        perm_seed = rng.randint(0, 1000000)
         prng = np.random.RandomState(perm_seed)
         y_bin_perm = pd.Series(prng.permutation(y_bin_base.to_numpy()), index=y_bin_base.index)
         perm_diff_df, _ = _one_diff_curve(y_bin_perm, fixed_params_dict=fixed_params_dict)
@@ -597,7 +602,9 @@ def joint_significance_test_source_comparison(source_a: str = "genomics", source
  
     return real_diff_df, real_stat, null_stats, p_value, p_ci_low, p_ci_high
  
-    
+# ---------------------------------------------------------------------------
+# PLOT
+# ---------------------------------------------------------------------------
 def plot_joint_significance_test(null_stats: np.ndarray, real_stat: float, summary_stat: str,
                                  output_path, xlabel: str = None, title: str = None):
     """Istogramma della distribuzione nulla della statistica riassuntiva, con la statistica osservata."""
@@ -614,10 +621,8 @@ def plot_joint_significance_test(null_stats: np.ndarray, real_stat: float, summa
     plt.savefig(output_path, dpi=150, bbox_inches="tight")
     plt.close()
     print(f"[plot_joint_significance_test] salvato in {output_path}")
-
-# ---------------------------------------------------------------------------
-# PLOT
-# ---------------------------------------------------------------------------
+    
+    
 def plot_specification_curve(spec_df: pd.DataFrame, spec_keys: list, output_path):
     """
     spec_keys deve includere anche "model_type" se vuoi vederlo nel pannello
