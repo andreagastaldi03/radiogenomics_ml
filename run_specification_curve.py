@@ -1,9 +1,9 @@
 import config
 import specification_curve as sc
 
-def main(run_joint_test: bool = True):
-    config.OUTPUT_DIR.mkdir(parents=True, exist_ok=True, run_source_comparison_test: bool = True,
-         source_comparison_pair=("genomics", "both"))
+def main(run_joint_test: bool = True, run_source_comparison_test: bool = True,
+         source_comparison_pair=("genomics", "both")):
+    config.OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 
     spec_df, feature_votes, feature_votes_by_model, feature_stats_long_df = sc.run_specification_curve()
 
