@@ -122,7 +122,7 @@ def _cv_eval(X: pd.DataFrame, y_bin: pd.Series, model_type: str,
     fold_params = []
 
     for train_idx, test_idx in cv.split(X, y_bin):
-        pipe = _build_pipe(model_type)
+        pipe = _build_pipe(model_type, fixed_params=fixed_params)
         pipe.fit(X.iloc[train_idx], y_bin.iloc[train_idx])
         proba = pipe.predict_proba(X.iloc[test_idx])[:, 1]
         
