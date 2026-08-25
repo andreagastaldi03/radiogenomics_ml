@@ -78,14 +78,17 @@ def _build_pipe(model_type: str, fixed_params: dict = None):
                     Cs=[0.01, 0.05, 0.1, 0.5, 1.0, 5.0],
                     l1_ratios=[0.1, 0.3, 0.5, 0.7, 0.9],
                     cv=3, scoring="roc_auc", 
-                    random_state=config.RANDOM_STATE
+                    random_state=config.RANDOM_STATE,
+                    n_jobs=-1,  # parallelizza le 6x5x3=90 combinazioni della grid search
+                                # interna sui core disponibili — stesso risultato, più veloce
                 )),
             ])
     elif model_type == "tree":
         return Pipeline([
             ("clf", RandomForestClassifier(
                 n_estimators=200, max_depth=3, min_samples_leaf=5,
-                random_state=config.RANDOM_STATE
+                random_state=config.RANDOM_STATE,
+                n_jobs=-1,  # parallelizza la costruzione dei 200 alberi sui core disponibili
             )),
         ])
     else:
