@@ -115,3 +115,12 @@ N_PERMUTATIONS_SPEC_CURVE = 100     # Simonsohn consiglia 500+, ma con n=54 e un
                                     # compromesso ragionevole
 SPEC_CURVE_SUMMARY_STAT = "median"  # statistica riassuntiva della curva: "median" 
                                     # o "mean" di auc_pooled
+    
+# Quante permutazioni valutare in parallelo (processi separati) nei test di
+# significatività congiunti (joint_significance_test e la sua variante
+# source_comparison): -1 = usa tutti i core disponibili, 1 = sequenziale. 
+# Durante l'esecuzione parallela il parallelismo interno del Random Forest 
+# (n_estimators) viene forzato a 1 automaticamente, altrimenti i processi si 
+# contenderebbero gli stessi core inutilmente:
+# vedi la nota su n_jobs_model in specification_curve.py.
+N_JOBS_SPEC_CURVE_PERMUTATIONS = -1

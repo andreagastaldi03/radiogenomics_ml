@@ -24,6 +24,7 @@ from sklearn.linear_model import LogisticRegressionCV, LogisticRegression
 from sklearn.ensemble import RandomForestClassifier
 from scipy.stats import binomtest
 from collections import Counter
+from joblib import Parallel, delayed
 
 import config
 import data_utils
@@ -57,7 +58,20 @@ REDUCED_SPEC_GRID = {
 MODEL_TYPES = ["linear", "tree"]
 
 
-def _build_pipe(model_type: str, fixed_params: dict = None):
+def _build_pipe(model_type: str, fixed_params: dict = None, n_jobs_model: int = -1):
+    """
+    n_jobs_model : parallelismo interno al fit di un singolo modello (grid
+        search della LogisticRegressionCV, alberi della RandomForest).
+        Di default -1 (usa tutti i core): corretto quando questa pipeline
+        viene fittata una alla volta, come nella curva reale o in
+        run_specification_curve.py lanciato da solo.
+        Quando invece è il chiamante a parallelizzare (es. tante permutazioni
+        in processi separati, vedi joint_significance_test), va passato 1:
+        altrimenti ogni processo prova a sua volta a occupare tutti i core e
+        i processi finiscono per contendersi le stesse risorse invece di
+        sommare velocità (parallelismo annidato, controproducente).
+    """
+
     if model_type == "linear":
         if fixed_params:
             # Usa iperparametri congelati (nessun tuning)
@@ -79,8 +93,8 @@ def _build_pipe(model_type: str, fixed_params: dict = None):
                     l1_ratios=[0.1, 0.3, 0.5, 0.7, 0.9],
                     cv=3, scoring="roc_auc", 
                     random_state=config.RANDOM_STATE,
-                    n_jobs=-1,  # parallelizza le 6x5x3=90 combinazioni della grid search
-                                # interna sui core disponibili — stesso risultato, più veloce
+                    n_jobs=n_jobs_model,  # parallelizza le 6x5x3=90 combinazioni della grid
+                                          # search interna sui core disponibili 
                 )),
             ])
     elif model_type == "tree":
@@ -88,7 +102,7 @@ def _build_pipe(model_type: str, fixed_params: dict = None):
             ("clf", RandomForestClassifier(
                 n_estimators=200, max_depth=3, min_samples_leaf=5,
                 random_state=config.RANDOM_STATE,
-                n_jobs=-1,  # parallelizza la costruzione dei 200 alberi sui core disponibili
+                n_jobs=n_jobs_model,  # parallelizza la costruzione dei 200 alberi sui core disponibili
             )),
         ])
     else:
@@ -110,7 +124,7 @@ def _extract_importance(fitted_pipe, model_type: str, columns) -> pd.Series:
 
 def _cv_eval(X: pd.DataFrame, y_bin: pd.Series, model_type: str,
              n_folds: int = 5, random_state: int = config.RANDOM_STATE,
-             fixed_params: dict = None):
+             fixed_params: dict = None, n_jobs_model: int = -1):
     """
     k-fold CV semplice per una specifica + un modello. Ritorna:
     - auc_mean, auc_sd: media/sd dell'AUC calcolata fold per fold
@@ -126,7 +140,7 @@ def _cv_eval(X: pd.DataFrame, y_bin: pd.Series, model_type: str,
     fold_params = []
 
     for train_idx, test_idx in cv.split(X, y_bin):
-        pipe = _build_pipe(model_type, fixed_params=fixed_params)
+        pipe = _build_pipe(model_type, fixed_params=fixed_params, n_jobs_model=n_jobs_model)
         pipe.fit(X.iloc[train_idx], y_bin.iloc[train_idx])
         proba = pipe.predict_proba(X.iloc[test_idx])[:, 1]
         
@@ -192,7 +206,8 @@ def run_specification_curve(spec_grid=None, model_types=None,
                              permute_labels: bool = False,
                              random_state: int = config.RANDOM_STATE,
                              fixed_params_dict: dict = None,
-                             verbose: bool = True):
+                             verbose: bool = True,
+                             n_jobs_model: int = -1):
     """
     Parametri aggiuntivi
     --------------------
@@ -277,7 +292,8 @@ def run_specification_curve(spec_grid=None, model_types=None,
             auc_mean, auc_sd, auc_pooled, coef_matrix, chosen_params = _cv_eval(
                 X_reduced, y_bin, model_type, n_folds,
                 random_state=config.RANDOM_STATE,
-                fixed_params=current_fixed_params
+                fixed_params=current_fixed_params,
+                n_jobs_model=n_jobs_model
             )
             fstats = _feature_stats(coef_matrix, model_type)
             
@@ -372,7 +388,8 @@ def _empirical_p_with_ci(null_stats: np.ndarray, real_stat: float, confidence_le
  
 def joint_significance_test(spec_grid=None, model_types=None, n_folds: int = 5,
                              n_permutations: int = None, summary_stat: str = None,
-                             random_state: int = config.RANDOM_STATE):
+                             random_state: int = config.RANDOM_STATE,
+                             n_jobs: int = None):
     """
     Costruisce la distribuzione nulla della specification curve permutando
     le etichette e rifacendo l'INTERA curva n_permutations volte, poi
@@ -383,6 +400,14 @@ def joint_significance_test(spec_grid=None, model_types=None, n_folds: int = 5,
     SPEC_GRID: sia la curva reale sia tutte le curve permutate vengono
     valutate sulla stessa griglia ridotta, altrimenti il confronto tra
     statistica reale e nulla non sarebbe corretto.
+    
+    Parametro n_jobs : 
+        quante permutazioni valutare in processi separati in parallelo.
+        None -> usa config.N_JOBS_SPEC_CURVE_PERMUTATIONS. 1 -> sequenziale. 
+        Il fit dei singoli modelli dentro ogni permutazione viene forzato a 
+        n_jobs_model=1 quando si parallelizza su più permutazioni (n_jobs != 1), 
+        per non annidare due livelli di parallelismo che si contenderebbero gli 
+        stessi core.
  
     Ritorna
     -------
@@ -397,6 +422,8 @@ def joint_significance_test(spec_grid=None, model_types=None, n_folds: int = 5,
     model_types = model_types or MODEL_TYPES
     n_permutations = n_permutations or config.N_PERMUTATIONS_SPEC_CURVE
     summary_stat = summary_stat or config.SPEC_CURVE_SUMMARY_STAT
+    n_jobs = config.N_JOBS_SPEC_CURVE_PERMUTATIONS if n_jobs is None else n_jobs
+    n_jobs_model = 1 if n_jobs != 1 else -1
  
     n_combos = len(list(itertools.product(*spec_grid.values()))) * len(model_types)
     print(f"\n[joint_significance_test] curva reale su griglia ridotta "
@@ -421,19 +448,32 @@ def joint_significance_test(spec_grid=None, model_types=None, n_folds: int = 5,
           f"combinazioni = {n_permutations * n_combos} fit totali.")
  
     rng = np.random.RandomState(random_state)
-    null_stats = np.empty(n_permutations)
-    for i in range(n_permutations):
-        perm_seed = rng.randint(0, 1000000)
+    perm_seeds = [rng.randint(0, 1000000) for _ in range(n_permutations)]
+    
+    def _run_one_permutation(perm_seed):
         perm_spec_df, _, _, _ = run_specification_curve(
             spec_grid=spec_grid, model_types=model_types, n_folds=n_folds,
             permute_labels=True, random_state=perm_seed,
             fixed_params_dict=fixed_params_dict,
-            verbose=False
+            verbose=False, n_jobs_model=n_jobs_model
         )
-        null_stats[i] = _summarize_curve(perm_spec_df["auc_pooled"], summary_stat)
-        if (i + 1) % 10 == 0:
-            print(f"[joint_significance_test] {i+1}/{n_permutations} permutazioni completate")
- 
+        return _summarize_curve(perm_spec_df["auc_pooled"], summary_stat)
+
+    null_stats = np.array(Parallel(n_jobs=n_jobs, verbose=5)( # È lo strumento che gestisce il 
+            # parallelismo.
+        delayed(_run_one_permutation)(seed) for seed in perm_seeds
+    ))
+        # In Python, qualsiasi funzione seguita dalle parentesi tonde () viene eseguita immediatamente.
+        # Di conseguenza, il ciclo for eseguirebbe _run_one_permutation(0), poi _run_one_permutation(1),
+        # e così via, in modo sequenziale sul processore principale. Solo dopo aver calcolato tutti i 
+        # risultati, Python passerebbe la lista finale di numeri a Parallel. A quel punto, il lavoro 
+        # sarebbe già finito e non ci sarebbe più nulla da parallelizzare. Cosa fa invece delayed?
+        # delayed è un "inganno" sintattico. Intercetta la chiamata prima che si attivi. Quando scrivi 
+        # delayed(_run_one_permutation)(i), non stai avviando la funzione. Stai dicendo a Python: 
+        # "Prendi la funzione calcolo_pesante, prendi l'argomento i, non fare nulla e impacchettali 
+        # insieme". In questo modo, la list comprehension genera una lista di oggetti congelati 
+        # e la consegna a Parallel. Poi avviene quindi la parallelizzazione. 
+
     # p-value empirico (Phipson & Smyth) + CI esatta (Clopper-Pearson) sulla sua incertezza
     p_value, p_ci_low, p_ci_high, n_successes = _empirical_p_with_ci(null_stats, real_stat)
  
@@ -464,7 +504,8 @@ def joint_significance_test(spec_grid=None, model_types=None, n_folds: int = 5,
 def joint_significance_test_source_comparison(source_a: str = "genomics", source_b: str = "both",
                                                 spec_grid=None, model_types=None, n_folds: int = 5,
                                                 n_permutations: int = None, summary_stat: str = None,
-                                                random_state: int = config.RANDOM_STATE):
+                                                random_state: int = config.RANDOM_STATE,
+                                                n_jobs: int = None):
     """
     Variante appaiata del test di significatività congiunto: non chiede "il
     segnale è più forte del caso?" (joint_significance_test) ma "SOURCE_B
@@ -503,7 +544,9 @@ def joint_significance_test_source_comparison(source_a: str = "genomics", source
     model_types = model_types or MODEL_TYPES
     n_permutations = n_permutations or config.N_PERMUTATIONS_SPEC_CURVE
     summary_stat = summary_stat or config.SPEC_CURVE_SUMMARY_STAT
- 
+    n_jobs = config.N_JOBS_SPEC_CURVE_PERMUTATIONS if n_jobs is None else n_jobs
+    n_jobs_model = 1 if n_jobs != 1 else -1
+
     # --- Allineamento pazienti tra le due sorgenti (confronto appaiato) ---
     X_raw_a, y_a = data_utils.load_data(source=source_a, print_info=False)
     X_raw_b, y_b = data_utils.load_data(source=source_b, print_info=False)
@@ -554,9 +597,11 @@ def joint_significance_test_source_comparison(source_a: str = "genomics", source
                 fp_b = fixed_params_dict.get((spec_key, "b")) if fixed_params_dict else None
                     # cerca un oggetto della forma (chiave, "a/b") nel dict dei param
                 _, _, auc_pooled_a, _, chosen_a = _cv_eval(
-                    X_a, y_bin, model_type, n_folds, random_state=config.RANDOM_STATE, fixed_params=fp_a)
+                    X_a, y_bin, model_type, n_folds, random_state=config.RANDOM_STATE, 
+                    fixed_params=fp_a, n_jobs_model=n_jobs_model)
                 _, _, auc_pooled_b, _, chosen_b = _cv_eval(
-                    X_b, y_bin, model_type, n_folds, random_state=config.RANDOM_STATE, fixed_params=fp_b)
+                    X_b, y_bin, model_type, n_folds, random_state=config.RANDOM_STATE, 
+                    fixed_params=fp_b, n_jobs_model=n_jobs_model)
                 rows.append({**spec, "model_type": model_type,
                              "auc_pooled_a": auc_pooled_a, "auc_pooled_b": auc_pooled_b,
                              "diff": auc_pooled_b - auc_pooled_a})
@@ -574,16 +619,18 @@ def joint_significance_test_source_comparison(source_a: str = "genomics", source
           f"combinazioni x 2 sorgenti.")
  
     rng = np.random.RandomState(random_state)
-    null_stats = np.empty(n_permutations)
-    for i in range(n_permutations):
-        perm_seed = rng.randint(0, 1000000)
+        perm_seeds = [rng.randint(0, 1000000) for _ in range(n_permutations)]
+ 
+    def _run_one_permutation(perm_seed):
         prng = np.random.RandomState(perm_seed)
         y_bin_perm = pd.Series(prng.permutation(y_bin_base.to_numpy()), index=y_bin_base.index)
         perm_diff_df, _ = _one_diff_curve(y_bin_perm, fixed_params_dict=fixed_params_dict)
-        null_stats[i] = _summarize_curve(perm_diff_df["diff"], summary_stat)
-        if (i + 1) % 10 == 0:
-            print(f"[joint_significance_test_source_comparison] {i+1}/{n_permutations} permutazioni completate")
+        return _summarize_curve(perm_diff_df["diff"], summary_stat)
  
+    null_stats = np.array(Parallel(n_jobs=n_jobs, verbose=5)(
+        delayed(_run_one_permutation)(seed) for seed in perm_seeds
+    ))
+
     p_value, p_ci_low, p_ci_high, n_successes = _empirical_p_with_ci(null_stats, real_stat)
  
     print(f"\n[joint_significance_test_source_comparison] {summary_stat} nullo (permutato): "
