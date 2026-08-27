@@ -122,15 +122,17 @@ def load_frozen_context(data_source: str = "both"):
 
 
 # ---------------------------------------------------------------------------
-# SHAP out-of-fold con iperparametri fissi: k-fold SEMPLICE (non nested,
+# SHAP out-of-fold con iperparametri fissi: k-fold semplice (non nested,
 # niente grid search), stessa filosofia di diagnostics._cv_auc — qui vogliamo
 # solo "con la ricetta già scelta, quali feature emergono?", non ritarare i
 # parametri sotto etichette permutate.
 # ---------------------------------------------------------------------------
 def _simple_outer_kfold_fit(X: pd.DataFrame, y_bin: pd.Series, model_name: str,
                             best_params: dict, n_folds: int, random_state: int):
-    """Produce un dict {'fitted_models', 'test_indices'} compatibile con
-    ml_pipeline.out_of_fold_shap, senza nested CV/tuning."""
+    """
+    Produce un dict {'fitted_models', 'test_indices'} compatibile con
+    ml_pipeline.out_of_fold_shap, senza nested CV/tuning.
+    """
     cv = StratifiedKFold(n_splits=n_folds, shuffle=True, random_state=random_state)
     results = {"fitted_models": [], "test_indices": []}
     for train_idx, test_idx in cv.split(X, y_bin):
@@ -153,8 +155,8 @@ def _one_consensus_run(y_labels: pd.Series, ctx: dict, random_state: int,
     iperparametri congelati da ctx, poi combina i tre criteri.
 
     Nota sulla permutazione: stability selection e SHAP condividono la
-    STESSA permutazione (la stessa y_labels passata a entrambe). I voti
-    della specification curve, invece, permutano INTERNAMENTE ed
+    stessa permutazione (la stessa y_labels passata a entrambe). I voti
+    della specification curve, invece, permutano internamente ed
     indipendentemente le label per ciascuna data_source della griglia
     (radiomics/genomics/both hanno pazienti diversi, quindi non esiste
     un'unica permutazione condivisibile tra tutte e tre) — una
@@ -178,6 +180,10 @@ def _one_consensus_run(y_labels: pd.Series, ctx: dict, random_state: int,
     _, mean_abs_shap = ml_pipeline.out_of_fold_shap(shap_results, X_reduced, model_type)
 
     permute_spec = not y_labels.equals(ctx["y"])
+        # la variabile permute_spec assume il valore True se le etichette y_labels sono 
+        # diverse da ctx["y"], altrimenti assume il valore False. Se y_lab è quella reale,
+        # non c'è permutazione e viene passato false, quindi run_spec_curve funge normalmente,
+        # altrimenti si applica la variante per etichette permutate (permutazione interna label)
     _, _, feature_votes_by_model, _ = sc.run_specification_curve(
         permute_labels=permute_spec, random_state=random_state,
         fixed_params_dict=ctx["spec_fixed_params_dict"],
@@ -252,7 +258,8 @@ def permutation_null_consensus(real_consensus_df: pd.DataFrame = None,
     perm_seeds = [rng.randint(0, 1_000_000) for _ in range(n_permutations)]
 
     def _run_one_permutation(perm_seed):
-        prng = np.random.RandomState(perm_seed)
+        prng = np.random.RandomState(perm_seed) # generatore casuale indipendente per specifica 
+            # permutazione.
         y_perm = pd.Series(prng.permutation(ctx["y"].to_numpy()), index=ctx["y"].index)
         perm_consensus_df = _one_consensus_run(
             y_perm, ctx, random_state=perm_seed,
@@ -260,6 +267,13 @@ def permutation_null_consensus(real_consensus_df: pd.DataFrame = None,
             n_jobs_model=n_jobs_model, verbose=False
         )
         return float(perm_consensus_df["consensus_score"].max())
+            # Tu non vuoi sapere: "Quanto è alto mediamente il consensus delle feature sotto 
+            # il caso?" ma vuoi sapere: "Quanto può diventare alto il consensus della feature 
+            # più fortunata anche quando tutto è casuale?". Perché nella realtà tu non guardi 
+            # una feature scelta prima, guardi centinaia di feature e poi dici: "Questa è 
+            # quella con consensus più alto!". Quindi devi tenere conto del multiple testing 
+            # implicito nella ricerca della feature migliore. Ecco perché il file parla di 
+            # max-statistic / Westfall–Young.
 
     null_max_scores = np.array(Parallel(n_jobs=n_jobs, verbose=10)(
         delayed(_run_one_permutation)(seed) for seed in perm_seeds
@@ -274,6 +288,11 @@ def permutation_null_consensus(real_consensus_df: pd.DataFrame = None,
         lambda s: (int(np.sum(null_max_scores >= s)) + 1) / (m + 1)
     )
     result_df["significant_fwer"] = result_df["p_value_fwer"] < 0.05
+        # Per ogni punteggio reale (s) nella colonna consensus_score, viene applicata una 
+        # formula:np.sum(null_max_scores >= s): Conta quante volte nei dati simulati 
+        # (ipotesi nulla) è stato ottenuto un punteggio massimo maggiore o uguale al punteggio
+        # reale s. /(m + 1): Divide per il numero totale di simulazioni per trasformare il 
+        # conteggio in una proporzione (probabilità).
 
     min_p = 1 / (m + 1)
     print(f"\n[permutation_null_consensus] consensus_score massimo nullo (permutato): "

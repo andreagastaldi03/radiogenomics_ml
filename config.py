@@ -161,7 +161,7 @@ RADIOGENOMICS_N_PERMUTATIONS_RV = 5000
 # caso (max-statistic / Westfall-Young): una feature reale deve battere
 # quella soglia, non solo le altre feature del dataset.
 # ---------------------------------------------------------------------------
-CONSENSUS_N_PERMUTATIONS = 10   # "un paio di volte": costoso, si tiene basso di proposito.
+CONSENSUS_N_PERMUTATIONS = 50   # "un paio di volte": costoso, si tiene basso di proposito.
                                 # Con m permutazioni il p-value minimo ottenibile è 1/(m+1):
                                 # con 3 permutazioni non si scende sotto 0.25 — usalo come
                                 # controllo di plausibilità, non come test ad alta risoluzione.
