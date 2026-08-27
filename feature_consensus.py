@@ -25,6 +25,38 @@ def _normalize_rank(series: pd.Series) -> pd.Series:
         # i pareggi con la posizione media (entrambi secondi diventa entrambi nella posizione 2.5)
     return (ranks - 1) / (len(series) - 1) # normalizzazione tra 0 e 1, al primo verrà asseganto 0
         # mentre all'ultimo 1.
+    
+    
+def _consensus_from_series(stable: pd.Series, shap_imp: pd.Series, spec_votes: pd.Series) -> pd.DataFrame:
+    """
+    Logica di calcolo del consensus score, isolata dal caricamento da file
+    csv (fatto da build_feature_consensus) in modo da poter essere
+    richiamata anche su Series già in memoria — è quello che serve a
+    consensus_significance.py per rifare lo stesso calcolo su etichette
+    permutate senza toccare il disco per ogni permutazione.
+    """
+    all_features = sorted(set(stable.index) | set(shap_imp.index) | set(spec_votes.index))
+    # sorted crea ordine alfabetico tra features
+ 
+    df = pd.DataFrame(index=all_features)
+    df["stability_selection_freq"] = stable.reindex(all_features).fillna(0)
+        # reindex conforms DataFrame to new index with optional filling logic -> NaN diventano 0
+    df["shap_mean_abs"] = shap_imp.reindex(all_features).fillna(0)
+    df["spec_curve_votes"] = spec_votes.reindex(all_features).fillna(0)
+ 
+    df["rank_stability"] = _normalize_rank(df["stability_selection_freq"])
+        # normalizza il rank tra 0 e 1 per ogni series -> per ogni colonna del df 
+    df["rank_shap"] = _normalize_rank(df["shap_mean_abs"])
+    df["rank_spec_votes"] = _normalize_rank(df["spec_curve_votes"])
+ 
+    df["consensus_score"] = df[["rank_stability", "rank_shap", "rank_spec_votes"]].mean(axis=1)
+    df["n_criteria_present"] = (
+        (df["stability_selection_freq"] > 0).astype(int)
+        + (df["shap_mean_abs"] > 0).astype(int)
+        + (df["spec_curve_votes"] > 0).astype(int)
+    )
+ 
+    return df.sort_values("consensus_score", ascending=False)
 
 
 def build_feature_consensus(stable_features_path, shap_importance_path,
@@ -35,36 +67,16 @@ def build_feature_consensus(stable_features_path, shap_importance_path,
     # crea delle Series dai file csv creati in precedenza, indicizzate con i nomi delle varie
     # features
 
-    all_features = sorted(set(stable.index) | set(shap_imp.index) | set(spec_votes.index))
-    # sorted crea ordine alfabetico tra features
-
-    df = pd.DataFrame(index=all_features)
-    df["stability_selection_freq"] = stable.reindex(all_features).fillna(0)
-        # reindex conforms DataFrame to new index with optional filling logic -> NaN diventano 0
-    df["shap_mean_abs"] = shap_imp.reindex(all_features).fillna(0)
-    df["spec_curve_votes"] = spec_votes.reindex(all_features).fillna(0)
-
-    df["rank_stability"] = _normalize_rank(df["stability_selection_freq"])
-        # normalizza il rank tra 0 e 1 per ogni series -> per ogni colonna del df 
-    df["rank_shap"] = _normalize_rank(df["shap_mean_abs"])
-    df["rank_spec_votes"] = _normalize_rank(df["spec_curve_votes"])
-
-    df["consensus_score"] = df[["rank_stability", "rank_shap", "rank_spec_votes"]].mean(axis=1)
-    df["n_criteria_present"] = (
-        (df["stability_selection_freq"] > 0).astype(int)
-        + (df["shap_mean_abs"] > 0).astype(int)
-        + (df["spec_curve_votes"] > 0).astype(int)
-    )
-
-    df = df.sort_values("consensus_score", ascending=False)
-
+    df = _consensus_from_series(stable, shap_imp, spec_votes)
+ 
     if output_path:
         df.to_csv(output_path)
         print(f"[feature_consensus] salvato in {output_path}")
-
+ 
     print("\n[feature_consensus] Top 15 feature per consenso:")
     print(df[["consensus_score", "n_criteria_present"]].head(15))
     return df
+
 
 
 if __name__ == "__main__":

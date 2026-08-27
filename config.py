@@ -147,3 +147,23 @@ RADIOGENOMICS_FDR_ALPHA = 0.05           # soglia sul q-value (Benjamini-Hochber
 # radiomica vs blocco genomica insieme, non sulle singole coppie
 RADIOGENOMICS_N_PERMUTATIONS_RV = 5000
 
+# ---------------------------------------------------------------------------
+# CORREZIONE PER TEST MULTIPLI SUL CONSENSUS SCORE (feature_consensus.py)
+#
+# Con centinaia di feature scremate da tre criteri indipendenti (stability
+# selection, SHAP, voti spec curve), guardare solo il ranking assoluto del
+# consensus_score rischia falsi positivi: anche senza nessun segnale reale
+# QUALCHE feature otterrà comunque un consenso alto tra i tre criteri per
+# puro caso. Si rigira l'intera pipeline di consenso su etichette permutate
+# un piccolo numero di volte (ESPANSIVO: bootstrap stability + SHAP + intera
+# specification curve, ripetuti per intero ad ogni permutazione) e si
+# guarda la distribuzione nulla del consensus_score PIÙ ALTO ottenuto per
+# caso (max-statistic / Westfall-Young): una feature reale deve battere
+# quella soglia, non solo le altre feature del dataset.
+# ---------------------------------------------------------------------------
+CONSENSUS_N_PERMUTATIONS = 3   # "un paio di volte": costoso, si tiene basso di proposito.
+                                # Con m permutazioni il p-value minimo ottenibile è 1/(m+1):
+                                # con 3 permutazioni non si scende sotto 0.25 — usalo come
+                                # controllo di plausibilità, non come test ad alta risoluzione.
+N_JOBS_CONSENSUS_PERMUTATIONS = -1  # permutazioni in parallelo (stessa logica di
+                                    # N_JOBS_SPEC_CURVE_PERMUTATIONS)
