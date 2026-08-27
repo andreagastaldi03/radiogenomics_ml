@@ -619,7 +619,7 @@ def joint_significance_test_source_comparison(source_a: str = "genomics", source
           f"combinazioni x 2 sorgenti.")
  
     rng = np.random.RandomState(random_state)
-        perm_seeds = [rng.randint(0, 1000000) for _ in range(n_permutations)]
+    perm_seeds = [rng.randint(0, 1000000) for _ in range(n_permutations)]
  
     def _run_one_permutation(perm_seed):
         prng = np.random.RandomState(perm_seed)
