@@ -124,3 +124,26 @@ SPEC_CURVE_SUMMARY_STAT = "median"  # statistica riassuntiva della curva: "media
 # contenderebbero gli stessi core inutilmente:
 # vedi la nota su n_jobs_model in specification_curve.py.
 N_JOBS_SPEC_CURVE_PERMUTATIONS = -1
+
+# ---------------------------------------------------------------------------
+# RADIOGENOMICA: associazione radiomica <-> genomica, INDIPENDENTE dalla label
+#
+# Punto diverso da tutto il resto della pipeline: qui non si chiede "questa
+# feature aiuta a predire ADK/SCC?" ma "le feature radiomiche stabili e i
+# geni stabili si muovono insieme tra pazienti?" — la classificazione
+# binaria ADK/SCC potrebbe far passare inosservata un'associazione
+# immagine-genoma reale, perché ogni feature deve prima "farsi strada"
+# attraverso il collo di bottiglia di un'unica etichetta.
+# ---------------------------------------------------------------------------
+# quali feature considerare "stabili": righe di feature_consensus.csv (vedi
+# feature_consensus.py) con almeno questo numero di criteri (stability
+# selection, SHAP, voti spec curve) su 3 in cui la feature compare.
+RADIOGENOMICS_MIN_CRITERIA = 2
+ 
+RADIOGENOMICS_CORR_METHOD = "spearman"   # "spearman" (monotona, robusta) o "pearson"
+RADIOGENOMICS_FDR_ALPHA = 0.05           # soglia sul q-value (Benjamini-Hochberg) per i singoli test
+ 
+# permutazioni per il test globale (coefficiente RV) sull'intero blocco
+# radiomica vs blocco genomica insieme, non sulle singole coppie
+RADIOGENOMICS_N_PERMUTATIONS_RV = 5000
+
