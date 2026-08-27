@@ -153,7 +153,7 @@ RADIOGENOMICS_N_PERMUTATIONS_RV = 5000
 # Con centinaia di feature scremate da tre criteri indipendenti (stability
 # selection, SHAP, voti spec curve), guardare solo il ranking assoluto del
 # consensus_score rischia falsi positivi: anche senza nessun segnale reale
-# QUALCHE feature otterrà comunque un consenso alto tra i tre criteri per
+# qualche feature otterrà comunque un consenso alto tra i tre criteri per
 # puro caso. Si rigira l'intera pipeline di consenso su etichette permutate
 # un piccolo numero di volte (ESPANSIVO: bootstrap stability + SHAP + intera
 # specification curve, ripetuti per intero ad ogni permutazione) e si
@@ -161,7 +161,7 @@ RADIOGENOMICS_N_PERMUTATIONS_RV = 5000
 # caso (max-statistic / Westfall-Young): una feature reale deve battere
 # quella soglia, non solo le altre feature del dataset.
 # ---------------------------------------------------------------------------
-CONSENSUS_N_PERMUTATIONS = 3   # "un paio di volte": costoso, si tiene basso di proposito.
+CONSENSUS_N_PERMUTATIONS = 10   # "un paio di volte": costoso, si tiene basso di proposito.
                                 # Con m permutazioni il p-value minimo ottenibile è 1/(m+1):
                                 # con 3 permutazioni non si scende sotto 0.25 — usalo come
                                 # controllo di plausibilità, non come test ad alta risoluzione.

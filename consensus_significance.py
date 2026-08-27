@@ -5,18 +5,18 @@ Il consensus score combina tre criteri indipendenti — stability selection
 bootstrap, SHAP out-of-fold, voti della specification curve — proprio per
 essere più difendibile di uno solo. Ma con centinaia di feature scremate da
 tre criteri, guardare solo il ranking assoluto resta rischioso: anche se
-NESSUNA feature avesse un legame reale col fenotipo, ci si aspetta comunque
+nessuna feature avesse un legame reale col fenotipo, ci si aspetta comunque
 che qualcuna ottenga un consenso alto tra i tre criteri semplicemente per
 caso (tre criteri rumorosi che "concordano per sbaglio" su una feature
 diversa ogni volta).
 
-Questo modulo rifà l'INTERA pipeline di consenso (bootstrap stability
+Questo modulo rifà l'intera pipeline di consenso (bootstrap stability
 selection + SHAP out-of-fold + intera specification curve) su etichette
 permutate, un piccolo numero di volte, e guarda il consensus_score più alto
 ottenuto per caso ad ogni permutazione. Confrontare ogni feature reale con
-QUESTA distribuzione (del massimo, non della media) è l'approccio
+questa distribuzione (del massimo, non della media) è l'approccio
 max-statistic / Westfall-Young: controlla il tasso di falsi positivi
-sull'INTERO esperimento (una feature qualunque emerge per caso), non solo
+sull'intero esperimento (una feature qualunque emerge per caso), non solo
 sulla singola feature.
 
 Costoso di proposito tenuto economico: gli iperparametri sono sempre quelli
@@ -51,24 +51,29 @@ def _parse_best_params(val):
     'tree' (RandomForest non viene tunato per-specifica, vedi
     specification_curve._cv_eval). Qui si fa il percorso inverso.
     """
-    if pd.isna(val):
+    if pd.isna(val): # Detect missing values for an array-like object.
         return None
-    return ast.literal_eval(val)
+    return ast.literal_eval(val) # prende una stringa, converte in modo sicuro 
+        # una stringa che rappresenta una struttura dati Python (come liste, 
+        # dizionari o tuple) nel suo rispettivo oggetto Python. è sicura al 100% 
+        # perché accetta solo stringhe contenenti stringhe, numeri, tuple, liste, 
+        # dizionari, booleani e None. Se la stringa contiene comandi dannosi, 
+        # si blocca ed estrae un errore.
 
 
 def load_frozen_context(data_source: str = "both"):
     """
     Ricostruisce, dai file già salvati, tutto ciò che serve per rifare
     stability selection + SHAP + specification curve con iperparametri
-    FISSI (quelli scelti una volta sola sui dati reali):
+    fissi (quelli scelti una volta sola sui dati reali):
 
     - best_model_name, best_params, model_type : il modello "migliore"
-      secondo l'AUC pooled OOF (stesso criterio di run_diagnostics.py)
+      secondo l'AUC pooled OOF
     - X_reduced, y : dati ridotti (neutri, indipendenti dalla label) e
       label originali, per la sorgente 'both' (serve avere sia le feature
       radiomiche sia quelle genomiche, essendo il consensus calcolato su
       un modello allenato su entrambe)
-    - spec_fixed_params_dict : iperparametri congelati per OGNI riga della
+    - spec_fixed_params_dict : iperparametri congelati per ogni riga della
       specification curve reale (chiave = combo di preprocessing + modello),
       da riusare identici in tutte le permutazioni della spec curve
     """
@@ -81,6 +86,8 @@ def load_frozen_context(data_source: str = "both"):
 
     best_params_df = pd.read_csv(run_output_dir / f"{best_model_name}_best_params_per_fold.csv")
     best_params = ml_pipeline.majority_vote_params(best_params_df.to_dict(orient="records"))
+        # converte un DataFrame di Pandas in una lista di dizionari, dove ogni dizionario 
+        # corrisponde a una riga della tabella.
 
     model_type = ml_pipeline.MODEL_TYPE_MAP.get(best_model_name)
     if model_type is None:

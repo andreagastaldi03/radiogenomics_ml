@@ -31,9 +31,7 @@ def _consensus_from_series(stable: pd.Series, shap_imp: pd.Series, spec_votes: p
     """
     Logica di calcolo del consensus score, isolata dal caricamento da file
     csv (fatto da build_feature_consensus) in modo da poter essere
-    richiamata anche su Series già in memoria — è quello che serve a
-    consensus_significance.py per rifare lo stesso calcolo su etichette
-    permutate senza toccare il disco per ogni permutazione.
+    richiamata anche su Series già in memoria.
     """
     all_features = sorted(set(stable.index) | set(shap_imp.index) | set(spec_votes.index))
     # sorted crea ordine alfabetico tra features
@@ -61,7 +59,8 @@ def _consensus_from_series(stable: pd.Series, shap_imp: pd.Series, spec_votes: p
 
 def build_feature_consensus(stable_features_path, shap_importance_path,
                              spec_votes_path, output_path=None):
-    stable = pd.read_csv(stable_features_path, index_col=0).iloc[:, 0]
+    stable = pd.read_csv(stable_features_path, index_col=0).iloc[:, 0] # iloc prende la prima 
+        # colonna di dati rimasta, cioè esclude la colonna 0 xk sono gli index
     shap_imp = pd.read_csv(shap_importance_path, index_col=0).iloc[:, 0]
     spec_votes = pd.read_csv(spec_votes_path, index_col=0).iloc[:, 0]
     # crea delle Series dai file csv creati in precedenza, indicizzate con i nomi delle varie
