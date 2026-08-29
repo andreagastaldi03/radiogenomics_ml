@@ -251,13 +251,13 @@ if __name__ == "__main__":
             out_dir = config.OUTPUT_DIR / "network" / feature_set / fdr_mode
             out_dir.mkdir(parents=True, exist_ok=True)
  
-            rad_df, gene_df, consensus = na.load_feature_set(FEATURE_SET)
+            rad_df, gene_df, consensus = na.load_feature_set(feature_set)
  
             print("\n" + "=" * 70)
-            print(f"MODELLO NULLO SU DENSITÀ E MODULARITÀ | feature_set='{FEATURE_SET}', "
-                  f"fdr_mode='{FDR_MODE}'")
+            print(f"MODELLO NULLO SU DENSITÀ E MODULARITÀ | feature_set='{feature_set}', "
+                  f"fdr_mode='{fdr_mode}'")
             print("=" * 70)
-            edge_long_df = na.build_edge_list(rad_df, gene_df, fdr_mode=FDR_MODE)
+            edge_long_df = na.build_edge_list(rad_df, gene_df, fdr_mode=fdr_mode)
             G = na.build_graph(edge_long_df, consensus=consensus)
  
             domain_assortativity(G)
@@ -273,7 +273,7 @@ if __name__ == "__main__":
             print("\n" + "=" * 70)
             print("BOOTSTRAP SULLA STABILITÀ DEGLI ARCHI")
             print("=" * 70)
-            stability_df = bootstrap_edge_stability(rad_df, gene_df, fdr_mode=FDR_MODE, n_bootstrap=200)
+            stability_df = bootstrap_edge_stability(rad_df, gene_df, fdr_mode=fdr_mode, n_bootstrap=200)
             stability_df.to_csv(out_dir / "edge_stability_bootstrap.csv", index=False)
             plot_edge_stability(stability_df, out_dir / "edge_stability.png")
  
