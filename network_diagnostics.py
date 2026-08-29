@@ -1,7 +1,6 @@
 """
 Diagnostica per lo studio di rete (network_analysis.py): la struttura
-osservata (es. 215 archi su 595 coppie testate, TPI1 come hub) è
-strutturale o in parte artefatto del campionamento con n=54?
+osservata è strutturale o in parte artefatto del campionamento con n=54?
 
 Due controlli, sullo stesso principio già usato nel resto del progetto
 (diagnostics.py per il modello ML, radiogenomics.py per il coefficiente RV):
@@ -22,7 +21,7 @@ Due controlli, sullo stesso principio già usato nel resto del progetto
    costruzione): la struttura a community osservata è più forte di quanto
    ci si aspetterebbe da un grafo ugualmente denso ma senza organizzazione?
 
-Entrambi i controlli sono COSTOSI (il bootstrap rifà l'intera pipeline di
+Entrambi i controlli sono costosi (il bootstrap rifà l'intera pipeline di
 correlazione+FDR ad ogni iterazione): tienili bassi durante lo sviluppo,
 alzali solo per la versione finale.
 """
@@ -51,7 +50,7 @@ def bootstrap_edge_stability(rad_df: pd.DataFrame, gene_df: pd.DataFrame,
     feature_2, selection_frequency = frazione di bootstrap in cui l'arco
     resta sotto soglia FDR). Un arco con selection_frequency bassa (es.
     <0.5) è statisticamente fragile anche se compare nel grafo osservato:
-    va segnalato come tale in presentazione, non taciuto.
+    va segnalato come tale.
     """
     method = method or config.RADIOGENOMICS_CORR_METHOD
     fdr_mode = fdr_mode or config.NETWORK_FDR_MODE
@@ -61,6 +60,9 @@ def bootstrap_edge_stability(rad_df: pd.DataFrame, gene_df: pd.DataFrame,
                                          fdr_mode=fdr_mode, fdr_alpha=fdr_alpha)
     observed_sig = observed_edges[observed_edges["q_value"] < fdr_alpha]
     observed_pairs = set(zip(observed_sig["feature_1"], observed_sig["feature_2"]))
+    if not observed_pairs:
+        print("[bootstrap_edge_stability] nessun arco osservato da validare: nessun bootstrap eseguito.")
+        return pd.DataFrame(columns=["feature_1", "feature_2", "selection_frequency"])
     print(f"\n[bootstrap_edge_stability] {len(observed_pairs)} archi osservati da validare "
           f"con {n_bootstrap} bootstrap (può richiedere diversi minuti)")
 
@@ -72,7 +74,7 @@ def bootstrap_edge_stability(rad_df: pd.DataFrame, gene_df: pd.DataFrame,
     counts = {pair: 0 for pair in observed_pairs}
 
     for b in range(n_bootstrap):
-        idx = rng.randint(0, n, size=n)  # pazienti ricampionati CON reinserimento
+        idx = rng.randint(0, n, size=n)  # pazienti ricampionati con reinserimento
         # reset_index: con reinserimento l'indice avrebbe pazienti duplicati,
         # e _correlation_pairs allinea rad/gene per indice — reset a un range
         # index 0..n-1 evita qualunque ambiguità nell'allineamento
@@ -129,7 +131,7 @@ def null_model_comparison(G: nx.Graph, n_null: int = 500,
     Confronta la modularità osservata con quella di grafi Erdős–Rényi
     casuali a parità di nodi e di numero di archi (nx.gnm_random_graph:
     stessa densità per costruzione, così il confronto isola l'effetto
-    della STRUTTURA e non quello, banale, della densità).
+    della struttura e non quello della densità).
     """
     n_nodes = G.number_of_nodes()
     n_edges = G.number_of_edges()
@@ -137,7 +139,7 @@ def null_model_comparison(G: nx.Graph, n_null: int = 500,
         print("[null_model_comparison] grafo senza archi: nessun confronto possibile.")
         return None, None, None
 
-    observed_density = nx.density(G)
+    observed_density = nx.density(G) # returns the ratio of actual edges to all possible edges in a graph G.
     observed_communities = nx.algorithms.community.greedy_modularity_communities(G, weight="weight")
     observed_modularity = nx.algorithms.community.modularity(G, observed_communities, weight="weight")
 
@@ -149,7 +151,7 @@ def null_model_comparison(G: nx.Graph, n_null: int = 500,
     rng = np.random.RandomState(random_state)
     null_modularity = np.empty(n_null)
     for i in range(n_null):
-        seed = rng.randint(0, 1_000_000)
+        seed = rng.randint(0, 1000000)
         G_null = nx.gnm_random_graph(n_nodes, n_edges, seed=seed)
         comms = nx.algorithms.community.greedy_modularity_communities(G_null)
         null_modularity[i] = nx.algorithms.community.modularity(G_null, comms)
@@ -162,7 +164,7 @@ def null_model_comparison(G: nx.Graph, n_null: int = 500,
     print(f"[null_model_comparison] p-value empirico: {p_value:.4f} "
           f"({b}/{n_null} grafi nulli >= alla modularità osservata)")
     if p_value >= 0.05:
-        print("[null_model_comparison] ATTENZIONE: la modularità osservata NON è "
+        print("[null_model_comparison] ATTENZIONE: la modularità osservata non è "
               "significativamente più alta di un grafo casuale altrettanto denso. La "
               "struttura a community trovata potrebbe riflettere principalmente la densità "
               "della rete, non una vera organizzazione in moduli biologici.")
@@ -196,7 +198,7 @@ def plot_null_model_comparison(observed_modularity: float, null_modularity: np.n
 def domain_assortativity(G: nx.Graph) -> float:
     """
     Coefficiente di assortatività per l'attributo 'domain' (rad/gen): >0
-    indica che i nodi tendono a legarsi con nodi dello STESSO dominio più
+    indica che i nodi tendono a legarsi con nodi dello stesso dominio più
     spesso che con l'altro (i due blocchi sono internamente coerenti e
     poco connessi tra loro); ~0 indica mescolamento casuale; <0 indica il
     contrario (i nodi si legano preferenzialmente con l'altro dominio).
@@ -207,6 +209,40 @@ def domain_assortativity(G: nx.Graph) -> float:
         print("[domain_assortativity] I due domini (radiomica/genomica) sono nettamente "
               "più coerenti al loro interno che collegati tra loro.")
     return r
+
+
+# ---------------------------------------------------------------------------
+# 4) RETE "CONFERMATA": solo archi che superano FDR *e* stabilità bootstrap
+# ---------------------------------------------------------------------------
+def build_confirmed_graph(G: nx.Graph, stability_df: pd.DataFrame,
+                           stability_threshold: float = 0.5) -> nx.Graph:
+    """
+    Versione finale: un arco resta nel grafo solo se (a) ha superato la correzione 
+    FDR e (b) ha selection_frequency >= stability_threshold nel bootstrap sui pazienti. 
+    È la rete più difendibile — gli archi "fragili" (significativi sui dati originali ma
+    instabili sotto ricampionamento) vengono tolti, non nascosti: restano comunque in 
+    stability_df per essere citati come segnale borderline.
+    """
+    stable_pairs = set(
+        tuple(row) for row in
+        stability_df[stability_df["selection_frequency"] >= stability_threshold]
+        [["feature_1", "feature_2"]].to_numpy()
+    )
+
+    G_confirmed = G.copy()
+    dropped = 0
+    for u, v in list(G.edges()):
+        if (u, v) not in stable_pairs and (v, u) not in stable_pairs:
+            G_confirmed.remove_edge(u, v)
+            dropped += 1
+    isolated = list(nx.isolates(G_confirmed))
+    G_confirmed.remove_nodes_from(isolated)
+
+    print(f"\n[build_confirmed_graph] soglia stabilità={stability_threshold}: "
+          f"{dropped} archi fragili rimossi, {len(isolated)} nodi rimasti isolati | "
+          f"rete confermata: {G_confirmed.number_of_nodes()} nodi, "
+          f"{G_confirmed.number_of_edges()} archi")
+    return G_confirmed
 
 
 if __name__ == "__main__":
@@ -239,6 +275,15 @@ if __name__ == "__main__":
     stability_df.to_csv(out_dir / "edge_stability_bootstrap.csv", index=False)
     plot_edge_stability(stability_df, out_dir / "edge_stability.png")
 
+    print("\n" + "=" * 70)
+    print("RETE CONFERMATA (FDR + stabilità bootstrap)")
+    print("=" * 70)
+    G_confirmed = build_confirmed_graph(G, stability_df, stability_threshold=0.5)
+    confirmed_stats = na.compute_network_stats(G_confirmed)
+    confirmed_stats.to_csv(out_dir / "network_confirmed_node_stats.csv", index=False)
+    na.plot_network(G_confirmed, confirmed_stats, out_dir / "network_confirmed_plot.png")
+    nx.write_graphml(G_confirmed, out_dir / "network_confirmed.graphml")
+
     with open(out_dir / "network_diagnostics_summary.txt", "w") as f:
         f.write(f"Nodi: {G.number_of_nodes()} | Archi: {G.number_of_edges()} | "
                 f"Densità: {nx.density(G):.4f}\n")
@@ -248,7 +293,10 @@ if __name__ == "__main__":
             f.write(f"Modularità osservata: {observed_modularity:.4f} | "
                     f"nulla: {null_modularity.mean():.4f} ± {null_modularity.std():.4f} | "
                     f"p-value: {p_value:.4f}\n")
+        n_stable = int((stability_df['selection_frequency'] >= 0.5).sum())
         f.write(f"Archi stabili (selection_frequency >= 0.5 su bootstrap): "
-                f"{int((stability_df['selection_frequency'] >= 0.5).sum())}/{len(stability_df)}\n")
+                f"{n_stable}/{len(stability_df)}\n")
+        f.write(f"Rete confermata (FDR + bootstrap): {G_confirmed.number_of_nodes()} nodi, "
+                f"{G_confirmed.number_of_edges()} archi\n")
 
     print(f"\nTutti i risultati sono stati salvati in: {out_dir}")
