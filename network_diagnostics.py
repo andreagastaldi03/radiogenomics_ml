@@ -246,9 +246,7 @@ def build_confirmed_graph(G: nx.Graph, stability_df: pd.DataFrame,
 
 
 if __name__ == "__main__":
-    for feature_set in ("stable", "neutral"):
-        rad_df, gene_df, consensus = load_feature_set(feature_set)
- 
+    for feature_set in ("stable", "neutral"): 
         for fdr_mode in ("unified", "separate"):
             out_dir = config.OUTPUT_DIR / "network" / feature_set / fdr_mode
             out_dir.mkdir(parents=True, exist_ok=True)
