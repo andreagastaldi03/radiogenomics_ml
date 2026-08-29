@@ -22,8 +22,8 @@ diversi: il numero non è comparabile.
 La metrica usata qui: modularity z-score rispetto a un modello nullo
 ---------------------------------------------------------------------
 network_diagnostics.null_model_comparison confronta già la modularità
-osservata con quella di grafi Erdős–Rényi CASUALI A PARITÀ DI NODI E
-ARCHI. Il risultato (uno z-score, o il p-value empirico) è già relativo
+osservata con quella di grafi Erdős–Rényi casuali a parità di nodi e
+archi. Il risultato (uno z-score, o il p-value empirico) è già relativo
 alla dimensione del grafo di quella specifica: gioca lo stesso ruolo che
 l'AUC giocava nella spec curve ML — una misura di "segnale oltre il
 rumore", comparabile tra specifiche di dimensione diversa.
@@ -67,7 +67,7 @@ import network_diagnostics as nd
 # ---------------------------------------------------------------------------
 # GRIGLIA DI SPECIFICHE — stesse 3 dimensioni già usate in specification_curve.py
 # lato ML (gene_selection_method, exclude_shape, redundancy_corr_threshold),
-# per restare confrontabile con quella. variance_threshold NON è qui incluso
+# per restare confrontabile con quella. variance_threshold non è qui incluso
 # per lo stesso motivo per cui non lo è in SPEC_GRID lato ML: neutral_feature_
 # reduction non lo espone come parametro di override (resta fisso su
 # config.VARIANCE_THRESHOLD). Aggiungibile in futuro sovrascrivendo
@@ -87,7 +87,7 @@ def _run_one_spec(X_raw: pd.DataFrame, spec: dict, data_source: str,
                    fdr_mode: str, fdr_alpha: float, method: str,
                    n_null: int, random_state: int, print_info: bool = False):
     """
-    Riduce le feature con QUESTA combinazione di parametri, costruisce il
+    Riduce le feature con questa combinazione di parametri, costruisce il
     grafo (rad-rad, gen-gen, rad-gen con correzione FDR), e calcola le
     metriche di specifica. Ritorna (row_dict, G) — G serve al chiamante per
     accumulare i conteggi di consenso su nodi/archi.

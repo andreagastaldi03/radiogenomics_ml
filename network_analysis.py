@@ -322,7 +322,7 @@ def compute_network_stats(G: nx.Graph) -> pd.DataFrame:
 # 5) PLOT
 # ---------------------------------------------------------------------------
 def plot_network(G: nx.Graph, stats_df: pd.DataFrame, output_path,
-                  seed: int = config.RANDOM_STATE, n_labels: int = 12):
+                  seed: int = config.RANDOM_STATE, n_labels: int = 15):
     """
     Layout force-directed (spring layout pesato su |correlazione|), tarato
     per restare leggibile anche con qualche decina di nodi e centinaia di
@@ -332,8 +332,11 @@ def plot_network(G: nx.Graph, stats_df: pd.DataFrame, output_path,
     - opacità dell'arco proporzionale al peso (|correlazione|): gli archi
       deboli quasi svaniscono, lasciando emergere visivamente la struttura
       portante senza doverla filtrare nei dati sottostanti;
-    - solo i primi n_labels nodi per grado vengono etichettati, con sfondo
-      bianco per restare leggibili anche sopra archi/nodi.
+    - i primi n_labels nodi per grado sono marcati con un NUMERO (non il
+      nome per esteso: con hub vicini nel layout, nomi lunghi come
+      "original_firstorder_..." si sovrappongono e diventano illeggibili),
+      con una legenda numero->nome in un pannello separato a fianco del
+      grafo, mai sovrapposta ai nodi.
     """
     if G.number_of_nodes() == 0:
         print("[plot_network] grafo vuoto (nessun arco sopra soglia FDR): nessun plot generato.")
@@ -345,7 +348,7 @@ def plot_network(G: nx.Graph, stats_df: pd.DataFrame, output_path,
  
     degree = dict(G.degree(weight="weight"))
     max_degree = max(degree.values()) or 1
-    node_sizes = [80 + 350 * degree[n_] / max_degree for n_ in G.nodes()]
+    node_sizes = [90 + 350 * degree[n_] / max_degree for n_ in G.nodes()]
     node_colors = ["#4C72B0" if G.nodes[n_]["domain"] == "rad" else "#C44E52" for n_ in G.nodes()]
  
     weights = np.array([G.edges[e]["weight"] for e in G.edges()])
@@ -354,21 +357,36 @@ def plot_network(G: nx.Graph, stats_df: pd.DataFrame, output_path,
     edge_alphas = 0.05 + 0.5 * (weights - w_min) / w_range  # deboli quasi invisibili
     edge_colors = ["#2E7D32" if G.edges[e]["correlation"] > 0 else "#B71C1C" for e in G.edges()]
  
-    plt.figure(figsize=(15, 13))
+    top_nodes = stats_df.nlargest(n_labels, "degree_weighted")["feature"].tolist()
+    rank_of = {node: i + 1 for i, node in enumerate(top_nodes)}  # 1 = grado più alto
+ 
+    fig, (ax_net, ax_legend) = plt.subplots(
+        1, 2, figsize=(18, 13), gridspec_kw={"width_ratios": [4.2, 1]}
+    )
+ 
     for (u, v), color, alpha in zip(G.edges(), edge_colors, edge_alphas):
         nx.draw_networkx_edges(G, pos, edgelist=[(u, v)], alpha=alpha,
-                                edge_color=color, width=1.0)
-    nx.draw_networkx_nodes(G, pos, node_size=node_sizes, node_color=node_colors, alpha=0.9)
+                                edge_color=color, width=1.0, ax=ax_net)
+    nx.draw_networkx_nodes(G, pos, node_size=node_sizes, node_color=node_colors,
+                            alpha=0.9, ax=ax_net)
  
-    top_nodes = stats_df.nlargest(n_labels, "degree_weighted")["feature"].tolist()
-    labels = {n_: n_.split("__", 1)[-1] for n_ in top_nodes}
-    nx.draw_networkx_labels(G, pos, labels=labels, font_size=9, font_weight="bold",
-                             bbox=dict(facecolor="white", alpha=0.75, edgecolor="none", pad=1))
+    number_labels = {n_: str(rank_of[n_]) for n_ in top_nodes}
+    nx.draw_networkx_labels(G, pos, labels=number_labels, font_size=9, font_weight="bold",
+                             font_color="white", ax=ax_net)
  
-    plt.title("Rete radiogenomica (feature stabili) — blu=radiomica, rosso=gene\n"
-              "arco verde=correlazione positiva, arco rosso=negativa "
-              "(opacità ∝ |correlazione|; etichette: top-{} per grado)".format(n_labels))
-    plt.axis("off")
+    ax_net.set_title("Rete radiogenomica — blu=radiomica, rosso=gene\n"
+                      "arco verde=correlazione positiva, arco rosso=negativa "
+                      "(opacità ∝ |correlazione|)")
+    ax_net.axis("off")
+ 
+    # legenda numero -> nome feature, in un pannello separato: mai sovrapposta
+    # ai nodi, leggibile indipendentemente da quanto sono fitti nel layout
+    ax_legend.axis("off")
+    legend_lines = [f"{rank_of[n_]:>2}.  {n_.split('__', 1)[-1]}" for n_ in top_nodes]
+    ax_legend.text(0, 1, "\n".join(legend_lines), fontsize=9.5, va="top", ha="left",
+                    family="monospace", transform=ax_legend.transAxes)
+    ax_legend.set_title(f"Top {n_labels} nodi\nper grado pesato", fontsize=10, loc="left")
+ 
     plt.tight_layout()
     plt.savefig(output_path, dpi=150, bbox_inches="tight")
     plt.close()
