@@ -1,0 +1,309 @@
+"""
+Studio di rete: relazioni TRA le feature (radiomica x radiomica, gene x
+gene, radiomica x gene) — completa run_analysis.py/radiogenomics.py
+estendendo la logica già usata per il singolo blocco incrociato rad x gen
+a tutte e tre le combinazioni possibili, rappresentate come un unico
+grafo pesato (nodi = feature, archi = correlazioni significative).
+
+Motivazione (stessa di radiogenomics.py, portata alle estreme
+conseguenze): la classificazione binaria ADK/SCC è un collo di bottiglia.
+Qui si abbandona del tutto la label per guardare direttamente come si
+organizza la struttura di correlazione tra le feature stesse, indipendente
+dal fenotipo tumorale. La label rientra SOLO alla fine, come attributo dei
+nodi per l'interpretazione (es. "gli hub della rete coincidono con le
+feature più discriminative nello studio ML?"), mai per decidere quali
+archi tenere.
+
+Riusa da radiogenomics.py:
+- load_stable_feature_sets / _load_raw_values: stessa selezione di feature
+  "stabili" (stability selection + SHAP + voti spec curve), indispensabile
+  con n=54 pazienti per non costruire una rete su centinaia di feature/geni
+  grezzi con potenza statistica quasi nulla per arco;
+- _benjamini_hochberg: stessa correzione per test multipli.
+
+Dati: solo CT in vivo (config.RADIOMICS_PATH punta già esclusivamente a
+out_CTinvivo_roiOrig.csv), quindi data_utils.load_data(source="both") non
+richiede alcuna modifica per restringere la sorgente radiomica.
+"""
+
+import numpy as np
+import pandas as pd
+import networkx as nx
+from scipy.stats import spearmanr, pearsonr
+import matplotlib
+matplotlib.use("Agg")  # backend non interattivo, per salvare plot da script
+import matplotlib.pyplot as plt
+
+import config
+import radiogenomics as rg  # riusa load_stable_feature_sets, _load_raw_values, _benjamini_hochberg
+
+
+# ---------------------------------------------------------------------------
+# 1) CORRELAZIONI PER BLOCCO (rettangolare o triangolare)
+# ---------------------------------------------------------------------------
+def _correlation_pairs(df_a: pd.DataFrame, df_b: pd.DataFrame = None,
+                        method: str = "spearman", block_name: str = "block") -> pd.DataFrame:
+    """
+    Calcola correlazione + p-value per coppie di colonne.
+
+    Se df_b è None: correlazioni INTRA-blocco su df_a — solo il triangolo
+    superiore (i<j), niente autocorrelazione feature-con-se-stessa e
+    niente coppie duplicate (a,b)/(b,a). Usalo per rad-rad e gen-gen.
+
+    Se df_b è fornito: correlazioni rettangolari tra ogni colonna di df_a
+    e ogni colonna di df_b — stesso comportamento di
+    radiogenomics.pairwise_correlation_matrix. Usalo per rad-gen.
+
+    Ritorna un DataFrame lungo: block, feature_1, feature_2, correlation, p_value.
+    """
+    corr_fn = spearmanr if method == "spearman" else pearsonr
+    if method not in ("spearman", "pearson"):
+        raise ValueError(f"method '{method}' non valido (usa 'spearman' o 'pearson')")
+
+    rows = []
+    if df_b is None:
+        cols = list(df_a.columns)
+        for i in range(len(cols)):
+            for j in range(i + 1, len(cols)):
+                r, p = corr_fn(df_a[cols[i]].to_numpy(), df_a[cols[j]].to_numpy())
+                rows.append({"block": block_name, "feature_1": cols[i], "feature_2": cols[j],
+                             "correlation": r, "p_value": p})
+    else:
+        common_idx = df_a.index.intersection(df_b.index)
+        if len(common_idx) < len(df_a) or len(common_idx) < len(df_b):
+            print(f"[_correlation_pairs:{block_name}] ATTENZIONE: allineati {len(common_idx)} "
+                  f"pazienti su {len(df_a)}/{len(df_b)}.")
+        df_a, df_b = df_a.loc[common_idx], df_b.loc[common_idx]
+        for ca in df_a.columns:
+            for cb in df_b.columns:
+                r, p = corr_fn(df_a[ca].to_numpy(), df_b[cb].to_numpy())
+                rows.append({"block": block_name, "feature_1": ca, "feature_2": cb,
+                             "correlation": r, "p_value": p})
+
+    df = pd.DataFrame(rows)
+    print(f"[_correlation_pairs:{block_name}] {len(df)} coppie testate "
+          f"({method}, {'triangolo superiore' if df_b is None else 'rettangolare'})")
+    return df
+
+
+# ---------------------------------------------------------------------------
+# 2) COSTRUZIONE DELLA EDGE LIST COMPLETA (rad-rad, gen-gen, rad-gen)
+# ---------------------------------------------------------------------------
+def build_edge_list(rad_df: pd.DataFrame, gene_df: pd.DataFrame,
+                     method: str = None, fdr_mode: str = None,
+                     fdr_alpha: float = None) -> pd.DataFrame:
+    """
+    Calcola le correlazioni nei tre blocchi (rad-rad, gen-gen, rad-gen) e
+    applica la correzione FDR secondo fdr_mode:
+
+    "unified"  (default, config.NETWORK_FDR_MODE) -> un'unica correzione
+        Benjamini-Hochberg su tutte le coppie insieme.
+    "separate" -> tre correzioni indipendenti, una per blocco.
+
+    Ritorna un unico DataFrame lungo con colonna "block" e "q_value",
+    ordinato per q_value crescente.
+    """
+    method = method or config.RADIOGENOMICS_CORR_METHOD
+    fdr_mode = fdr_mode or config.NETWORK_FDR_MODE
+    fdr_alpha = config.NETWORK_FDR_ALPHA if fdr_alpha is None else fdr_alpha
+    if fdr_mode not in ("unified", "separate"):
+        raise ValueError(f"fdr_mode '{fdr_mode}' non valido (usa 'unified' o 'separate')")
+
+    rad_rad = _correlation_pairs(rad_df, method=method, block_name="rad-rad")
+    gen_gen = _correlation_pairs(gene_df, method=method, block_name="gen-gen")
+    rad_gen = _correlation_pairs(rad_df, gene_df, method=method, block_name="rad-gen")
+
+    if fdr_mode == "unified":
+        combined = pd.concat([rad_rad, gen_gen, rad_gen], ignore_index=True)
+        combined["q_value"] = rg._benjamini_hochberg(combined["p_value"].to_numpy())
+    else:
+        parts = []
+        for part in (rad_rad, gen_gen, rad_gen):
+            part = part.copy()
+            part["q_value"] = rg._benjamini_hochberg(part["p_value"].to_numpy())
+            parts.append(part)
+        combined = pd.concat(parts, ignore_index=True)
+
+    combined = combined.sort_values("q_value").reset_index(drop=True)
+
+    n_total = len(combined)
+    n_sig = int((combined["q_value"] < fdr_alpha).sum())
+    print(f"\n[build_edge_list] modalità FDR = '{fdr_mode}' | {n_total} coppie totali "
+          f"(rad-rad={len(rad_rad)}, gen-gen={len(gen_gen)}, rad-gen={len(rad_gen)}) | "
+          f"{n_sig} archi con q<{fdr_alpha}")
+    for block_name, part in combined.groupby("block"):
+        n_sig_block = int((part["q_value"] < fdr_alpha).sum())
+        print(f"  [{block_name}] {n_sig_block}/{len(part)} coppie sopra soglia")
+    if n_sig == 0:
+        print("[build_edge_list] ATTENZIONE: nessuna coppia sopravvive alla correzione FDR. "
+              "Con n=54 è un esito comune anche in presenza di segnale reale ma debole. Prima "
+              "di abbassare la soglia, valuta 'separate' invece di 'unified' (meno conservativo) "
+              "o guarda le coppie con q più basso in valore assoluto come segnale esplorativo, "
+              "da riportare come tale e non come risultato confermato.")
+
+    return combined
+
+
+# ---------------------------------------------------------------------------
+# 3) COSTRUZIONE DEL GRAFO
+# ---------------------------------------------------------------------------
+def build_graph(edge_long_df: pd.DataFrame, fdr_alpha: float = None,
+                 consensus: pd.DataFrame = None) -> nx.Graph:
+    """
+    Costruisce un networkx.Graph non orientato: nodi = feature (rad__/gen__),
+    archi = coppie con q_value < fdr_alpha, peso = |correlazione| (il segno
+    resta disponibile come attributo separato 'correlation', per
+    distinguere in seguito legami positivi/negativi).
+
+    Ogni nodo riceve un attributo 'domain' ('rad' o 'gen', dal prefisso di
+    colonna) e, se consensus è fornito (da feature_consensus.csv), gli
+    attributi 'consensus_score' e 'n_criteria_present' — usati SOLO per
+    interpretazione/plot successivi, mai per decidere quali archi tenere:
+    la costruzione del grafo dipende esclusivamente dalla correlazione tra
+    feature, non dal quanto quella feature "conta" nello studio ML.
+    """
+    fdr_alpha = config.NETWORK_FDR_ALPHA if fdr_alpha is None else fdr_alpha
+    sig = edge_long_df[edge_long_df["q_value"] < fdr_alpha]
+
+    G = nx.Graph()
+    all_features = set(edge_long_df["feature_1"]) | set(edge_long_df["feature_2"])
+    for feat in all_features:
+        domain = "rad" if feat.startswith("rad__") else "gen"
+        attrs = {"domain": domain}
+        if consensus is not None and feat in consensus.index:
+            attrs["consensus_score"] = float(consensus.loc[feat, "consensus_score"])
+            attrs["n_criteria_present"] = int(consensus.loc[feat, "n_criteria_present"])
+        G.add_node(feat, **attrs)
+
+    for _, row in sig.iterrows():
+        G.add_edge(row["feature_1"], row["feature_2"],
+                    weight=abs(row["correlation"]), correlation=row["correlation"],
+                    q_value=row["q_value"], block=row["block"])
+
+    # i nodi rimasti isolati (nessun arco sopravvissuto a FDR) vengono
+    # tolti dal grafo: restano comunque nella edge_long_df/consensus salvati
+    # su disco, per riferimento e per capire cosa NON è entrato in rete
+    isolated = list(nx.isolates(G))
+    G.remove_nodes_from(isolated)
+
+    print(f"\n[build_graph] q<{fdr_alpha}: {G.number_of_nodes()} nodi, "
+          f"{G.number_of_edges()} archi ({len(isolated)} nodi isolati rimossi)")
+    return G
+
+
+# ---------------------------------------------------------------------------
+# 4) STATISTICHE DI RETE
+# ---------------------------------------------------------------------------
+def compute_network_stats(G: nx.Graph) -> pd.DataFrame:
+    """
+    Statistiche nodo per nodo: grado (pesato e non), centralità di
+    betweenness ed eigenvector (pesate su |correlazione|), community
+    detection tramite modularità greedy (nativa in networkx, nessuna
+    dipendenza aggiuntiva rispetto a python-louvain).
+    """
+    degree_weighted = dict(G.degree(weight="weight"))
+    betweenness = nx.betweenness_centrality(G, weight="weight")
+    try:
+        eigenvector = nx.eigenvector_centrality(G, weight="weight", max_iter=1000)
+    except nx.PowerIterationFailedConvergence:
+        print("[compute_network_stats] ATTENZIONE: eigenvector centrality non converge "
+              "(grafo probabilmente troppo sparso o disconnesso in più componenti); "
+              "valori impostati a NaN per questo grafo.")
+        eigenvector = {n: np.nan for n in G.nodes()}
+
+    communities = nx.algorithms.community.greedy_modularity_communities(G, weight="weight")
+    community_map = {}
+    for i, comm in enumerate(communities):
+        for node in comm:
+            community_map[node] = i
+
+    rows = []
+    for node in G.nodes():
+        rows.append({
+            "feature": node,
+            "domain": G.nodes[node].get("domain"),
+            "degree_weighted": degree_weighted[node],
+            "degree_unweighted": G.degree(node),
+            "betweenness": betweenness[node],
+            "eigenvector_centrality": eigenvector[node],
+            "community": community_map[node],
+            "consensus_score": G.nodes[node].get("consensus_score", np.nan),
+            "n_criteria_present": G.nodes[node].get("n_criteria_present", np.nan),
+        })
+    stats_df = pd.DataFrame(rows).sort_values("degree_weighted", ascending=False)
+
+    print(f"\n[compute_network_stats] {len(communities)} community trovate (modularità greedy).")
+    print("[compute_network_stats] Top 10 nodi per grado pesato:")
+    print(stats_df[["feature", "domain", "degree_weighted", "betweenness", "community"]]
+          .head(10).to_string(index=False))
+
+    return stats_df
+
+
+# ---------------------------------------------------------------------------
+# 5) PLOT
+# ---------------------------------------------------------------------------
+def plot_network(G: nx.Graph, stats_df: pd.DataFrame, output_path,
+                  seed: int = config.RANDOM_STATE):
+    """
+    Layout force-directed (spring layout pesato su |correlazione|): nodi
+    colorati per dominio (rad=blu, gen=rosso), dimensione proporzionale al
+    grado pesato. Archi colorati per segno della correlazione (verde=positiva,
+    rosso scuro=negativa). Solo i primi 15 nodi per grado vengono etichettati,
+    per non affollare il plot con centinaia di nomi di gene sovrapposti.
+    """
+    if G.number_of_nodes() == 0:
+        print("[plot_network] grafo vuoto (nessun arco sopra soglia FDR): nessun plot generato.")
+        return
+
+    pos = nx.spring_layout(G, weight="weight", seed=seed)
+    degree = dict(G.degree(weight="weight"))
+    max_degree = max(degree.values()) or 1
+    node_sizes = [80 + 400 * degree[n] / max_degree for n in G.nodes()]
+    node_colors = ["#4C72B0" if G.nodes[n]["domain"] == "rad" else "#C44E52" for n in G.nodes()]
+    edge_colors = ["#2E7D32" if G.edges[e]["correlation"] > 0 else "#B71C1C" for e in G.edges()]
+
+    plt.figure(figsize=(11, 9))
+    nx.draw_networkx_edges(G, pos, alpha=0.35, edge_color=edge_colors, width=1.0)
+    nx.draw_networkx_nodes(G, pos, node_size=node_sizes, node_color=node_colors, alpha=0.85)
+    top_nodes = stats_df.nlargest(15, "degree_weighted")["feature"].tolist()
+    labels = {n: n.split("__", 1)[-1] for n in top_nodes}  # senza prefisso rad__/gen__
+    nx.draw_networkx_labels(G, pos, labels=labels, font_size=7)
+
+    plt.title("Rete radiogenomica (feature stabili) — blu=radiomica, rosso=gene\n"
+              "arco verde=correlazione positiva, arco rosso=negativa")
+    plt.axis("off")
+    plt.tight_layout()
+    plt.savefig(output_path, dpi=150, bbox_inches="tight")
+    plt.close()
+    print(f"[plot_network] salvato in {output_path}")
+
+
+if __name__ == "__main__":
+    out_dir = config.OUTPUT_DIR / "network"
+    out_dir.mkdir(parents=True, exist_ok=True)
+
+    rad_features, gene_features, consensus = rg.load_stable_feature_sets()
+    rad_df, gene_df = rg._load_raw_values(rad_features, gene_features)
+
+    print("\n" + "=" * 70)
+    print("COSTRUZIONE EDGE LIST (rad-rad, gen-gen, rad-gen)")
+    print("=" * 70)
+    edge_long_df = build_edge_list(rad_df, gene_df)
+    edge_long_df.to_csv(out_dir / "correlation_pairs_long_full.csv", index=False)
+
+    print("\n" + "=" * 70)
+    print("COSTRUZIONE DEL GRAFO")
+    print("=" * 70)
+    G = build_graph(edge_long_df, consensus=consensus)
+    nx.write_graphml(G, out_dir / "network.graphml")  # apribile anche in Gephi/Cytoscape
+
+    print("\n" + "=" * 70)
+    print("STATISTICHE DI RETE")
+    print("=" * 70)
+    stats_df = compute_network_stats(G)
+    stats_df.to_csv(out_dir / "network_node_stats.csv", index=False)
+
+    plot_network(G, stats_df, out_dir / "network_plot.png")
+
+    print(f"\nTutti i risultati sono stati salvati in: {out_dir}")

@@ -167,3 +167,37 @@ CONSENSUS_N_PERMUTATIONS = 50   # "un paio di volte": costoso, si tiene basso di
                                 # controllo di plausibilità, non come test ad alta risoluzione.
 N_JOBS_CONSENSUS_PERMUTATIONS = -1  # permutazioni in parallelo (stessa logica di
                                     # N_JOBS_SPEC_CURVE_PERMUTATIONS)
+# ---------------------------------------------------------------------------
+ 
+
+# ---------------------------------------------------------------------------
+# STUDIO DI RETE (network_analysis.py)
+# ---------------------------------------------------------------------------
+#
+# Secondo approccio, complementare a quello supervisionato: invece di
+# chiedere "radiomica/genomica predicono il fenotipo?", si guarda come si
+# organizza la struttura di correlazione tra le feature stesse — rad-rad,
+# gen-gen, rad-gen — rappresentata come un grafo pesato (nodi = feature,
+# archi = correlazioni significative dopo FDR). Riusa la stessa selezione
+# di feature "stabili" (feature_consensus.csv, tramite
+# radiogenomics.load_stable_feature_sets) e lo stesso metodo di
+# correlazione di RADIOGENOMICS_CORR_METHOD, per restare nello stesso
+# principio di riduzione della dimensionalità già usato altrove nel
+# progetto: con n=54 pazienti, costruire la rete su TUTTE le feature/geni
+# grezzi darebbe potenza statistica quasi nulla per arco.
+# ---------------------------------------------------------------------------
+# Come correggere per test multipli quando si combinano tre tipi di coppie
+# (rad-rad, gen-gen, rad-gen), che hanno un numero di confronti molto
+# diverso tra loro:
+# "unified"  -> un'unica correzione Benjamini-Hochberg su tutte le coppie
+#               insieme: un'unica soglia di significatività coerente su
+#               tutta la rete. Più conservativa, ma evita che hub/community
+#               risultino un artefatto di soglie disomogenee tra blocchi.
+#               Default, e scelta consigliata per un unico studio di rete
+#               (vs. tre matrici di correlazione affiancate).
+# "separate" -> tre correzioni indipendenti, una per blocco: più
+#               permissivo per blocco (rilevante soprattutto per gen-gen,
+#               che ha molte più coppie di rad-gen o rad-rad), ma produce
+#               soglie di significatività diverse tra i tre sotto-grafi.
+NETWORK_FDR_MODE = "unified"    # "unified" o "separate"
+NETWORK_FDR_ALPHA = 0.05        # soglia sul q-value per includere un arco nel grafo
