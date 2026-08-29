@@ -1,15 +1,14 @@
 """
-Studio di rete: relazioni TRA le feature (radiomica x radiomica, gene x
+Studio di rete: relazioni tra le feature (radiomica x radiomica, gene x
 gene, radiomica x gene) — completa run_analysis.py/radiogenomics.py
 estendendo la logica già usata per il singolo blocco incrociato rad x gen
 a tutte e tre le combinazioni possibili, rappresentate come un unico
 grafo pesato (nodi = feature, archi = correlazioni significative).
 
-Motivazione (stessa di radiogenomics.py, portata alle estreme
-conseguenze): la classificazione binaria ADK/SCC è un collo di bottiglia.
+Motivazione: la classificazione binaria ADK/SCC è un collo di bottiglia.
 Qui si abbandona del tutto la label per guardare direttamente come si
 organizza la struttura di correlazione tra le feature stesse, indipendente
-dal fenotipo tumorale. La label rientra SOLO alla fine, come attributo dei
+dal fenotipo tumorale. La label rientra solo alla fine, come attributo dei
 nodi per l'interpretazione (es. "gli hub della rete coincidono con le
 feature più discriminative nello studio ML?"), mai per decidere quali
 archi tenere.
@@ -21,9 +20,9 @@ Riusa da radiogenomics.py:
   grezzi con potenza statistica quasi nulla per arco;
 - _benjamini_hochberg: stessa correzione per test multipli.
 
-Dati: solo CT in vivo (config.RADIOMICS_PATH punta già esclusivamente a
-out_CTinvivo_roiOrig.csv), quindi data_utils.load_data(source="both") non
-richiede alcuna modifica per restringere la sorgente radiomica.
+Dati: config.RADIOMICS_PATH punta già esclusivamente a out_CTinvivo_roiOrig.csv, 
+quindi data_utils.load_data(source="both") non richiede alcuna modifica per 
+restringere la sorgente radiomica.
 """
 
 import numpy as np
@@ -46,13 +45,13 @@ def _correlation_pairs(df_a: pd.DataFrame, df_b: pd.DataFrame = None,
     """
     Calcola correlazione + p-value per coppie di colonne.
 
-    Se df_b è None: correlazioni INTRA-blocco su df_a — solo il triangolo
+    Se df_b è None: correlazioni intra-blocco su df_a — solo il triangolo
     superiore (i<j), niente autocorrelazione feature-con-se-stessa e
-    niente coppie duplicate (a,b)/(b,a). Usalo per rad-rad e gen-gen.
+    niente coppie duplicate (a,b)/(b,a). Usato per rad-rad e gen-gen.
 
     Se df_b è fornito: correlazioni rettangolari tra ogni colonna di df_a
     e ogni colonna di df_b — stesso comportamento di
-    radiogenomics.pairwise_correlation_matrix. Usalo per rad-gen.
+    radiogenomics.pairwise_correlation_matrix. Usato per rad-gen.
 
     Ritorna un DataFrame lungo: block, feature_1, feature_2, correlation, p_value.
     """
@@ -133,11 +132,11 @@ def build_edge_list(rad_df: pd.DataFrame, gene_df: pd.DataFrame,
           f"{n_sig} archi con q<{fdr_alpha}")
     for block_name, part in combined.groupby("block"):
         n_sig_block = int((part["q_value"] < fdr_alpha).sum())
-        print(f"  [{block_name}] {n_sig_block}/{len(part)} coppie sopra soglia")
+        print(f"  [{block_name}] {n_sig_block}/{len(part)} coppie con q<{fdr_alpha}")
     if n_sig == 0:
         print("[build_edge_list] ATTENZIONE: nessuna coppia sopravvive alla correzione FDR. "
               "Con n=54 è un esito comune anche in presenza di segnale reale ma debole. Prima "
-              "di abbassare la soglia, valuta 'separate' invece di 'unified' (meno conservativo) "
+              "di abbassare la soglia, valuta 'separate' invece di 'unified' "
               "o guarda le coppie con q più basso in valore assoluto come segnale esplorativo, "
               "da riportare come tale e non come risultato confermato.")
 
@@ -151,13 +150,13 @@ def build_graph(edge_long_df: pd.DataFrame, fdr_alpha: float = None,
                  consensus: pd.DataFrame = None) -> nx.Graph:
     """
     Costruisce un networkx.Graph non orientato: nodi = feature (rad__/gen__),
-    archi = coppie con q_value < fdr_alpha, peso = |correlazione| (il segno
-    resta disponibile come attributo separato 'correlation', per
+    archi = coppie con q_value < fdr_alpha, peso = |correlazione| 
+    (il segno resta disponibile come attributo separato 'correlation', per
     distinguere in seguito legami positivi/negativi).
 
     Ogni nodo riceve un attributo 'domain' ('rad' o 'gen', dal prefisso di
-    colonna) e, se consensus è fornito (da feature_consensus.csv), gli
-    attributi 'consensus_score' e 'n_criteria_present' — usati SOLO per
+    colonna) e, se consensus è fornito (feature_consensus.csv), gli
+    attributi 'consensus_score' e 'n_criteria_present' — usati solo per
     interpretazione/plot successivi, mai per decidere quali archi tenere:
     la costruzione del grafo dipende esclusivamente dalla correlazione tra
     feature, non dal quanto quella feature "conta" nello studio ML.
@@ -182,7 +181,7 @@ def build_graph(edge_long_df: pd.DataFrame, fdr_alpha: float = None,
 
     # i nodi rimasti isolati (nessun arco sopravvissuto a FDR) vengono
     # tolti dal grafo: restano comunque nella edge_long_df/consensus salvati
-    # su disco, per riferimento e per capire cosa NON è entrato in rete
+    # su disco, per riferimento e per capire cosa non è entrato in rete
     isolated = list(nx.isolates(G))
     G.remove_nodes_from(isolated)
 
@@ -202,9 +201,22 @@ def compute_network_stats(G: nx.Graph) -> pd.DataFrame:
     dipendenza aggiuntiva rispetto a python-louvain).
     """
     degree_weighted = dict(G.degree(weight="weight"))
+        # restituisce esclusivamente la somma dei pesi, non include informazioni sul numero 
+        # effettivo di collegamenti (il grado non pesato).
+        # Quanto è complessivamente forte l'insieme delle connessioni di questa feature?
     betweenness = nx.betweenness_centrality(G, weight="weight")
+        # Quanto spesso questo nodo si trova lungo i percorsi più brevi che collegano altri nodi?
+        # non abbia necessariamente il maggior numero di connessioni, ma potrebbe essere un ponte 
+        # tra due moduli biologici/regioni del grafo. La betweenness potrebbe quindi identificare
+        # feature che occupano una posizione di intermediazione nella rete. Questo è concettualmente 
+        # diverso dal dire che sia una feature molto correlata.
+        # How the Weight Parameter Works: Interpretation as Distance - Edge weights are treated as 
+        # distances or costs, lower weights mean shorter, more preferred paths, while higher weights 
+        # mean longer paths.
     try:
         eigenvector = nx.eigenvector_centrality(G, weight="weight", max_iter=1000)
+            # Quanto è importante un nodo considerando anche l'importanza dei nodi a cui è collegato?
+            # The function returns a dictionary mapping each node to its computed eigenvector centrality value.
     except nx.PowerIterationFailedConvergence:
         print("[compute_network_stats] ATTENZIONE: eigenvector centrality non converge "
               "(grafo probabilmente troppo sparso o disconnesso in più componenti); "
@@ -212,6 +224,13 @@ def compute_network_stats(G: nx.Graph) -> pd.DataFrame:
         eigenvector = {n: np.nan for n in G.nodes()}
 
     communities = nx.algorithms.community.greedy_modularity_communities(G, weight="weight")
+        # Quali gruppi di nodi formano comunità naturalmente dense al loro interno?
+        # La modularità cerca di capire se il grafo ha più connessioni interne alle comunità di quante ci 
+        # aspetteremmo casualmente. Cerca una suddivisione del grafo in comunità che aumenti la modularità.
+        # "Greedy" significa, in sostanza, che utilizza una strategia iterativa: fa modifiche locali alla 
+        # partizione che migliorano la modularità, cercando progressivamente una buona soluzione. Non 
+        # significa necessariamente che trovi la partizione matematicamente ottimale globale.
+        # It uses the specified edge attribute to compute edge weights during modularity maximization.
     community_map = {}
     for i, comm in enumerate(communities):
         for node in comm:
@@ -244,34 +263,52 @@ def compute_network_stats(G: nx.Graph) -> pd.DataFrame:
 # 5) PLOT
 # ---------------------------------------------------------------------------
 def plot_network(G: nx.Graph, stats_df: pd.DataFrame, output_path,
-                  seed: int = config.RANDOM_STATE):
+                  seed: int = config.RANDOM_STATE, n_labels: int = 12):
     """
-    Layout force-directed (spring layout pesato su |correlazione|): nodi
-    colorati per dominio (rad=blu, gen=rosso), dimensione proporzionale al
-    grado pesato. Archi colorati per segno della correlazione (verde=positiva,
-    rosso scuro=negativa). Solo i primi 15 nodi per grado vengono etichettati,
-    per non affollare il plot con centinaia di nomi di gene sovrapposti.
+    Layout force-directed (spring layout pesato su |correlazione|), tarato
+    per restare leggibile anche con qualche decina di nodi e centinaia di
+    archi:
+    - k (repulsione tra nodi) più alto del default, per allargare il grafo
+      invece di farlo accartocciare al centro;
+    - opacità dell'arco proporzionale al peso (|correlazione|): gli archi
+      deboli quasi svaniscono, lasciando emergere visivamente la struttura
+      portante senza doverla filtrare nei dati sottostanti;
+    - solo i primi n_labels nodi per grado vengono etichettati, con sfondo
+      bianco per restare leggibili anche sopra archi/nodi.
     """
     if G.number_of_nodes() == 0:
         print("[plot_network] grafo vuoto (nessun arco sopra soglia FDR): nessun plot generato.")
         return
-
-    pos = nx.spring_layout(G, weight="weight", seed=seed)
+ 
+    n = G.number_of_nodes()
+    k = 3.0 / np.sqrt(n)  # più alto del default networkx (~1/sqrt(n)): nodi più distanziati
+    pos = nx.spring_layout(G, weight="weight", seed=seed, k=k, iterations=200)
+ 
     degree = dict(G.degree(weight="weight"))
     max_degree = max(degree.values()) or 1
-    node_sizes = [80 + 400 * degree[n] / max_degree for n in G.nodes()]
-    node_colors = ["#4C72B0" if G.nodes[n]["domain"] == "rad" else "#C44E52" for n in G.nodes()]
+    node_sizes = [80 + 350 * degree[n_] / max_degree for n_ in G.nodes()]
+    node_colors = ["#4C72B0" if G.nodes[n_]["domain"] == "rad" else "#C44E52" for n_ in G.nodes()]
+ 
+    weights = np.array([G.edges[e]["weight"] for e in G.edges()])
+    w_min, w_max = weights.min(), weights.max()
+    w_range = (w_max - w_min) or 1.0
+    edge_alphas = 0.05 + 0.5 * (weights - w_min) / w_range  # deboli quasi invisibili
     edge_colors = ["#2E7D32" if G.edges[e]["correlation"] > 0 else "#B71C1C" for e in G.edges()]
-
-    plt.figure(figsize=(11, 9))
-    nx.draw_networkx_edges(G, pos, alpha=0.35, edge_color=edge_colors, width=1.0)
-    nx.draw_networkx_nodes(G, pos, node_size=node_sizes, node_color=node_colors, alpha=0.85)
-    top_nodes = stats_df.nlargest(15, "degree_weighted")["feature"].tolist()
-    labels = {n: n.split("__", 1)[-1] for n in top_nodes}  # senza prefisso rad__/gen__
-    nx.draw_networkx_labels(G, pos, labels=labels, font_size=7)
-
+ 
+    plt.figure(figsize=(15, 13))
+    for (u, v), color, alpha in zip(G.edges(), edge_colors, edge_alphas):
+        nx.draw_networkx_edges(G, pos, edgelist=[(u, v)], alpha=alpha,
+                                edge_color=color, width=1.0)
+    nx.draw_networkx_nodes(G, pos, node_size=node_sizes, node_color=node_colors, alpha=0.9)
+ 
+    top_nodes = stats_df.nlargest(n_labels, "degree_weighted")["feature"].tolist()
+    labels = {n_: n_.split("__", 1)[-1] for n_ in top_nodes}
+    nx.draw_networkx_labels(G, pos, labels=labels, font_size=9, font_weight="bold",
+                             bbox=dict(facecolor="white", alpha=0.75, edgecolor="none", pad=1))
+ 
     plt.title("Rete radiogenomica (feature stabili) — blu=radiomica, rosso=gene\n"
-              "arco verde=correlazione positiva, arco rosso=negativa")
+              "arco verde=correlazione positiva, arco rosso=negativa "
+              "(opacità ∝ |correlazione|; etichette: top-{} per grado)".format(n_labels))
     plt.axis("off")
     plt.tight_layout()
     plt.savefig(output_path, dpi=150, bbox_inches="tight")
