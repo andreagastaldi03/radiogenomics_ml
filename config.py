@@ -201,3 +201,11 @@ N_JOBS_CONSENSUS_PERMUTATIONS = -1  # permutazioni in parallelo (stessa logica d
 #               soglie di significatività diverse tra i tre sotto-grafi.
 NETWORK_FDR_MODE = "unified"    # "unified" o "separate"
 NETWORK_FDR_ALPHA = 0.05        # soglia sul q-value per includere un arco nel grafo
+
+# Quante reti Erdős–Rényi generare per il modello nullo dentro la network
+# specification curve (network_specification_curve.py): tenuto più basso
+# del default usato per la rete finale in network_diagnostics.null_model_comparison
+# (500) perché qui il modello nullo viene ricalcolato per ogni combinazione
+# della griglia, non una volta sola. 200 basta a stimare media/sd della
+# modularità nulla con precisione più che sufficiente per uno z-score.
+NETWORK_SPEC_CURVE_N_NULL = 200
