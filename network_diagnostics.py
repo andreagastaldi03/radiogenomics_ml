@@ -246,57 +246,61 @@ def build_confirmed_graph(G: nx.Graph, stability_df: pd.DataFrame,
 
 
 if __name__ == "__main__":
-    out_dir = config.OUTPUT_DIR / "network"
-    out_dir.mkdir(parents=True, exist_ok=True)
-
-    rad_features, gene_features, consensus = rg.load_stable_feature_sets()
-    rad_df, gene_df = rg._load_raw_values(rad_features, gene_features)
-
-    print("\n" + "=" * 70)
-    print("MODELLO NULLO SU DENSITÀ E MODULARITÀ")
-    print("=" * 70)
-    edge_long_df = na.build_edge_list(rad_df, gene_df)
-    G = na.build_graph(edge_long_df, consensus=consensus)
-
-    domain_assortativity(G)
-
-    observed_modularity, null_modularity, p_value = null_model_comparison(G)
-    if null_modularity is not None:
-        plot_null_model_comparison(observed_modularity, null_modularity,
-                                    out_dir / "null_model_modularity.png")
-        pd.Series(null_modularity, name="modularity_null").to_csv(
-            out_dir / "null_model_modularity_distribution.csv", index=False
-        )
-
-    print("\n" + "=" * 70)
-    print("BOOTSTRAP SULLA STABILITÀ DEGLI ARCHI")
-    print("=" * 70)
-    stability_df = bootstrap_edge_stability(rad_df, gene_df, n_bootstrap=200)
-    stability_df.to_csv(out_dir / "edge_stability_bootstrap.csv", index=False)
-    plot_edge_stability(stability_df, out_dir / "edge_stability.png")
-
-    print("\n" + "=" * 70)
-    print("RETE CONFERMATA (FDR + stabilità bootstrap)")
-    print("=" * 70)
-    G_confirmed = build_confirmed_graph(G, stability_df, stability_threshold=0.5)
-    confirmed_stats = na.compute_network_stats(G_confirmed)
-    confirmed_stats.to_csv(out_dir / "network_confirmed_node_stats.csv", index=False)
-    na.plot_network(G_confirmed, confirmed_stats, out_dir / "network_confirmed_plot.png")
-    nx.write_graphml(G_confirmed, out_dir / "network_confirmed.graphml")
-
-    with open(out_dir / "network_diagnostics_summary.txt", "w") as f:
-        f.write(f"Nodi: {G.number_of_nodes()} | Archi: {G.number_of_edges()} | "
-                f"Densità: {nx.density(G):.4f}\n")
-        f.write(f"Assortatività per dominio (rad/gen): "
-                f"{nx.attribute_assortativity_coefficient(G, 'domain'):.4f}\n")
-        if null_modularity is not None:
-            f.write(f"Modularità osservata: {observed_modularity:.4f} | "
-                    f"nulla: {null_modularity.mean():.4f} ± {null_modularity.std():.4f} | "
-                    f"p-value: {p_value:.4f}\n")
-        n_stable = int((stability_df['selection_frequency'] >= 0.5).sum())
-        f.write(f"Archi stabili (selection_frequency >= 0.5 su bootstrap): "
-                f"{n_stable}/{len(stability_df)}\n")
-        f.write(f"Rete confermata (FDR + bootstrap): {G_confirmed.number_of_nodes()} nodi, "
-                f"{G_confirmed.number_of_edges()} archi\n")
-
-    print(f"\nTutti i risultati sono stati salvati in: {out_dir}")
+    for feature_set in ("stable", "neutral"):
+        rad_df, gene_df, consensus = load_feature_set(feature_set)
+ 
+        for fdr_mode in ("unified", "separate"):
+            out_dir = config.OUTPUT_DIR / "network" / feature_set / fdr_mode
+            out_dir.mkdir(parents=True, exist_ok=True)
+ 
+            rad_df, gene_df, consensus = na.load_feature_set(FEATURE_SET)
+ 
+            print("\n" + "=" * 70)
+            print(f"MODELLO NULLO SU DENSITÀ E MODULARITÀ | feature_set='{FEATURE_SET}', "
+                  f"fdr_mode='{FDR_MODE}'")
+            print("=" * 70)
+            edge_long_df = na.build_edge_list(rad_df, gene_df, fdr_mode=FDR_MODE)
+            G = na.build_graph(edge_long_df, consensus=consensus)
+ 
+            domain_assortativity(G)
+ 
+            observed_modularity, null_modularity, p_value = null_model_comparison(G)
+            if null_modularity is not None:
+                plot_null_model_comparison(observed_modularity, null_modularity,
+                                            out_dir / "null_model_modularity.png")
+                pd.Series(null_modularity, name="modularity_null").to_csv(
+                    out_dir / "null_model_modularity_distribution.csv", index=False
+                )
+ 
+            print("\n" + "=" * 70)
+            print("BOOTSTRAP SULLA STABILITÀ DEGLI ARCHI")
+            print("=" * 70)
+            stability_df = bootstrap_edge_stability(rad_df, gene_df, fdr_mode=FDR_MODE, n_bootstrap=200)
+            stability_df.to_csv(out_dir / "edge_stability_bootstrap.csv", index=False)
+            plot_edge_stability(stability_df, out_dir / "edge_stability.png")
+ 
+            print("\n" + "=" * 70)
+            print("RETE CONFERMATA (FDR + stabilità bootstrap)")
+            print("=" * 70)
+            G_confirmed = build_confirmed_graph(G, stability_df, stability_threshold=0.5)
+            confirmed_stats = na.compute_network_stats(G_confirmed)
+            confirmed_stats.to_csv(out_dir / "network_confirmed_node_stats.csv", index=False)
+            na.plot_network(G_confirmed, confirmed_stats, out_dir / "network_confirmed_plot.png")
+            nx.write_graphml(G_confirmed, out_dir / "network_confirmed.graphml")
+ 
+            with open(out_dir / "network_diagnostics_summary.txt", "w") as f:
+                f.write(f"Nodi: {G.number_of_nodes()} | Archi: {G.number_of_edges()} | "
+                        f"Densità: {nx.density(G):.4f}\n")
+                f.write(f"Assortatività per dominio (rad/gen): "
+                        f"{nx.attribute_assortativity_coefficient(G, 'domain'):.4f}\n")
+                if null_modularity is not None:
+                    f.write(f"Modularità osservata: {observed_modularity:.4f} | "
+                            f"nulla: {null_modularity.mean():.4f} ± {null_modularity.std():.4f} | "
+                            f"p-value: {p_value:.4f}\n")
+                n_stable = int((stability_df['selection_frequency'] >= 0.5).sum())
+                f.write(f"Archi stabili (selection_frequency >= 0.5 su bootstrap): "
+                        f"{n_stable}/{len(stability_df)}\n")
+                f.write(f"Rete confermata (FDR + bootstrap): {G_confirmed.number_of_nodes()} nodi, "
+                        f"{G_confirmed.number_of_edges()} archi\n")
+ 
+            print(f"\nTutti i risultati sono stati salvati in: {out_dir}")

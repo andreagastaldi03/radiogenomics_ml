@@ -38,6 +38,60 @@ import radiogenomics as rg  # riusa load_stable_feature_sets, _load_raw_values, 
 
 
 # ---------------------------------------------------------------------------
+# 0) SCELTA DEL SET DI FEATURE SU CUI COSTRUIRE LA RETE
+# ---------------------------------------------------------------------------
+def load_feature_set(feature_set: str = "neutral", data_source: str = "both",
+                      min_criteria: int = None):
+    """
+    Due studi complementari, con scopi diversi:
+ 
+    feature_set="stable" -> nodi = feature "stabili" del modello ML
+        (stability selection + SHAP + voti spec curve), via
+        radiogenomics.load_stable_feature_sets(). Gli ARCHI restano
+        indipendenti dalla label (correlazione feature-feature, mai
+        feature-label), ma la scelta dei nodi dipende dalla label: solo
+        feature già dimostrate rilevanti per ADK/SCC possono comparire.
+        Risponde a "come si relazionano tra loro le feature che il modello
+        ha trovato importanti?" — un ponte diretto con lo studio ML, non
+        uno studio radiogenomico generale.
+ 
+    feature_set="neutral" -> nodi = tutte le feature sopravvissute alla sola
+        riduzione neutra (varianza + ridondanza), lette direttamente da
+        X_reduced_features.csv — la stessa riduzione già usata come input
+        del modello ML in run_analysis.py, non un nuovo criterio scelto ad
+        hoc per l'occasione. Nessuna dipendenza dalla label, né negli archi
+        né nella scelta dei nodi: è lo studio radiogenomico generale.
+ 
+    Ritorna rad_df, gene_df, consensus (consensus è None per "neutral": non
+    esiste un consensus ML da cui leggere n_criteria_present per feature che
+    il modello potrebbe non aver mai visto come importanti).
+    """
+    if feature_set == "stable":
+        rad_features, gene_features, consensus = rg.load_stable_feature_sets(
+            data_source=data_source, min_criteria=min_criteria)
+        rad_df, gene_df = rg._load_raw_values(rad_features, gene_features)
+        return rad_df, gene_df, consensus
+ 
+    elif feature_set == "neutral":
+        path = config.OUTPUT_DIR / data_source / "X_reduced_features.csv"
+        if not path.exists():
+            raise FileNotFoundError(
+                f"{path} non trovato: esegui prima run_analysis.py con "
+                f"DATA_SOURCE='{data_source}' (salva X_reduced_features.csv "
+                f"come output della sola riduzione neutra, prima di ogni fit)."
+            )
+        X_reduced = pd.read_csv(path, index_col=0)
+        rad_cols = [c for c in X_reduced.columns if c.startswith("rad__")]
+        gene_cols = [c for c in X_reduced.columns if c.startswith("gen__")]
+        print(f"[load_feature_set:neutral] {path}: {len(rad_cols)} feature radiomiche, "
+              f"{len(gene_cols)} geni (dopo sola riduzione neutra")
+        return X_reduced[rad_cols], X_reduced[gene_cols], None
+ 
+    else:
+        raise ValueError(f"feature_set '{feature_set}' non valido (usa 'stable' o 'neutral')")
+
+        
+# ---------------------------------------------------------------------------
 # 1) CORRELAZIONI PER BLOCCO (rettangolare o triangolare)
 # ---------------------------------------------------------------------------
 def _correlation_pairs(df_a: pd.DataFrame, df_b: pd.DataFrame = None,
@@ -317,30 +371,37 @@ def plot_network(G: nx.Graph, stats_df: pd.DataFrame, output_path,
 
 
 if __name__ == "__main__":
-    out_dir = config.OUTPUT_DIR / "network"
-    out_dir.mkdir(parents=True, exist_ok=True)
-
-    rad_features, gene_features, consensus = rg.load_stable_feature_sets()
-    rad_df, gene_df = rg._load_raw_values(rad_features, gene_features)
-
-    print("\n" + "=" * 70)
-    print("COSTRUZIONE EDGE LIST (rad-rad, gen-gen, rad-gen)")
-    print("=" * 70)
-    edge_long_df = build_edge_list(rad_df, gene_df)
-    edge_long_df.to_csv(out_dir / "correlation_pairs_long_full.csv", index=False)
-
-    print("\n" + "=" * 70)
-    print("COSTRUZIONE DEL GRAFO")
-    print("=" * 70)
-    G = build_graph(edge_long_df, consensus=consensus)
-    nx.write_graphml(G, out_dir / "network.graphml")  # apribile anche in Gephi/Cytoscape
-
-    print("\n" + "=" * 70)
-    print("STATISTICHE DI RETE")
-    print("=" * 70)
-    stats_df = compute_network_stats(G)
-    stats_df.to_csv(out_dir / "network_node_stats.csv", index=False)
-
-    plot_network(G, stats_df, out_dir / "network_plot.png")
-
-    print(f"\nTutti i risultati sono stati salvati in: {out_dir}")
+    for feature_set in ("stable", "neutral"):
+        rad_df, gene_df, consensus = load_feature_set(feature_set)
+ 
+        for fdr_mode in ("unified", "separate"):
+            out_dir = config.OUTPUT_DIR / "network" / feature_set / fdr_mode
+            out_dir.mkdir(parents=True, exist_ok=True)
+ 
+            print("\n" + "=" * 70)
+            print(f"FEATURE SET = '{feature_set}' | FDR MODE = '{fdr_mode}'")
+            print("=" * 70)
+ 
+            print("\n" + "=" * 70)
+            print("COSTRUZIONE EDGE LIST (rad-rad, gen-gen, rad-gen)")
+            print("=" * 70)
+            edge_long_df = build_edge_list(rad_df, gene_df, fdr_mode=fdr_mode)
+            edge_long_df.to_csv(out_dir / "correlation_pairs_long_full.csv", index=False)
+ 
+            print("\n" + "=" * 70)
+            print("COSTRUZIONE DEL GRAFO")
+            print("=" * 70)
+            G = build_graph(edge_long_df, consensus=consensus)
+            nx.write_graphml(G, out_dir / "network.graphml")
+             
+            print("\n" + "=" * 70)
+            print("STATISTICHE DI RETE")
+            print("=" * 70)
+            stats_df = compute_network_stats(G)
+            stats_df.to_csv(out_dir / "network_node_stats.csv", index=False)
+ 
+            plot_network(G, stats_df, out_dir / "network_plot.png")
+ 
+            print(f"[main] risultati salvati in: {out_dir}")
+ 
+    print(f"\nTutte le combinazioni sono state salvate sotto: {config.OUTPUT_DIR / 'network'}")
