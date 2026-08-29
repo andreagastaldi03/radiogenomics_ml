@@ -95,7 +95,8 @@ def load_feature_set(feature_set: str = "neutral", data_source: str = "both",
 # 1) CORRELAZIONI PER BLOCCO (rettangolare o triangolare)
 # ---------------------------------------------------------------------------
 def _correlation_pairs(df_a: pd.DataFrame, df_b: pd.DataFrame = None,
-                        method: str = "spearman", block_name: str = "block") -> pd.DataFrame:
+                        method: str = "spearman", block_name: str = "block",
+                        print_info: bool = True) -> pd.DataFrame:
     """
     Calcola correlazione + p-value per coppie di colonne.
 
@@ -134,8 +135,9 @@ def _correlation_pairs(df_a: pd.DataFrame, df_b: pd.DataFrame = None,
                              "correlation": r, "p_value": p})
 
     df = pd.DataFrame(rows)
-    print(f"[_correlation_pairs:{block_name}] {len(df)} coppie testate "
-          f"({method}, {'triangolo superiore' if df_b is None else 'rettangolare'})")
+    if print_info:
+        print(f"[_correlation_pairs:{block_name}] {len(df)} coppie testate "
+              f"({method}, {'triangolo superiore' if df_b is None else 'rettangolare'})")
     return df
 
 
@@ -144,7 +146,7 @@ def _correlation_pairs(df_a: pd.DataFrame, df_b: pd.DataFrame = None,
 # ---------------------------------------------------------------------------
 def build_edge_list(rad_df: pd.DataFrame, gene_df: pd.DataFrame,
                      method: str = None, fdr_mode: str = None,
-                     fdr_alpha: float = None) -> pd.DataFrame:
+                     fdr_alpha: float = None, print_info: bool = True) -> pd.DataFrame:
     """
     Calcola le correlazioni nei tre blocchi (rad-rad, gen-gen, rad-gen) e
     applica la correzione FDR secondo fdr_mode:
@@ -162,9 +164,10 @@ def build_edge_list(rad_df: pd.DataFrame, gene_df: pd.DataFrame,
     if fdr_mode not in ("unified", "separate"):
         raise ValueError(f"fdr_mode '{fdr_mode}' non valido (usa 'unified' o 'separate')")
 
-    rad_rad = _correlation_pairs(rad_df, method=method, block_name="rad-rad")
-    gen_gen = _correlation_pairs(gene_df, method=method, block_name="gen-gen")
-    rad_gen = _correlation_pairs(rad_df, gene_df, method=method, block_name="rad-gen")
+    rad_rad = _correlation_pairs(rad_df, method=method, block_name="rad-rad", print_info=print_info)
+    gen_gen = _correlation_pairs(gene_df, method=method, block_name="gen-gen", print_info=print_info)
+    rad_gen = _correlation_pairs(rad_df, gene_df, method=method, block_name="rad-gen", 
+                                 print_info=print_info)
 
     if fdr_mode == "unified":
         combined = pd.concat([rad_rad, gen_gen, rad_gen], ignore_index=True)
@@ -181,12 +184,14 @@ def build_edge_list(rad_df: pd.DataFrame, gene_df: pd.DataFrame,
 
     n_total = len(combined)
     n_sig = int((combined["q_value"] < fdr_alpha).sum())
-    print(f"\n[build_edge_list] modalità FDR = '{fdr_mode}' | {n_total} coppie totali "
-          f"(rad-rad={len(rad_rad)}, gen-gen={len(gen_gen)}, rad-gen={len(rad_gen)}) | "
-          f"{n_sig} archi con q<{fdr_alpha}")
+    if print_info:
+        print(f"\n[build_edge_list] modalità FDR = '{fdr_mode}' | {n_total} coppie totali "
+              f"(rad-rad={len(rad_rad)}, gen-gen={len(gen_gen)}, rad-gen={len(rad_gen)}) | "
+              f"{n_sig} archi con q<{fdr_alpha}")
     for block_name, part in combined.groupby("block"):
         n_sig_block = int((part["q_value"] < fdr_alpha).sum())
-        print(f"  [{block_name}] {n_sig_block}/{len(part)} coppie con q<{fdr_alpha}")
+        if print_info:
+            print(f"  [{block_name}] {n_sig_block}/{len(part)} coppie con q<{fdr_alpha}")
     if n_sig == 0:
         print("[build_edge_list] ATTENZIONE: nessuna coppia sopravvive alla correzione FDR. "
               "Con n=54 è un esito comune anche in presenza di segnale reale ma debole. Prima "

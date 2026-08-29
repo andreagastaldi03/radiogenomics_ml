@@ -44,7 +44,8 @@ import network_analysis as na
 def bootstrap_edge_stability(rad_df: pd.DataFrame, gene_df: pd.DataFrame,
                               n_bootstrap: int = 200, method: str = None,
                               fdr_mode: str = None, fdr_alpha: float = None,
-                              random_state: int = config.RANDOM_STATE) -> pd.DataFrame:
+                              random_state: int = config.RANDOM_STATE,
+                              print_info: bool = False) -> pd.DataFrame:
     """
     Ritorna un DataFrame con un arco osservato per riga (feature_1,
     feature_2, selection_frequency = frazione di bootstrap in cui l'arco
@@ -57,7 +58,8 @@ def bootstrap_edge_stability(rad_df: pd.DataFrame, gene_df: pd.DataFrame,
     fdr_alpha = config.NETWORK_FDR_ALPHA if fdr_alpha is None else fdr_alpha
 
     observed_edges = na.build_edge_list(rad_df, gene_df, method=method,
-                                         fdr_mode=fdr_mode, fdr_alpha=fdr_alpha)
+                                         fdr_mode=fdr_mode, fdr_alpha=fdr_alpha,
+                                         print_info=print_info)
     observed_sig = observed_edges[observed_edges["q_value"] < fdr_alpha]
     observed_pairs = set(zip(observed_sig["feature_1"], observed_sig["feature_2"]))
     if not observed_pairs:
@@ -82,14 +84,15 @@ def bootstrap_edge_stability(rad_df: pd.DataFrame, gene_df: pd.DataFrame,
         gene_b = gene_df.iloc[idx].reset_index(drop=True)
 
         edges_b = na.build_edge_list(rad_b, gene_b, method=method,
-                                      fdr_mode=fdr_mode, fdr_alpha=fdr_alpha)
+                                      fdr_mode=fdr_mode, fdr_alpha=fdr_alpha, 
+                                      print_info=print_info)
         sig_b = edges_b[edges_b["q_value"] < fdr_alpha]
         pairs_b = set(zip(sig_b["feature_1"], sig_b["feature_2"]))
 
         for pair in observed_pairs:
             if pair in pairs_b:
                 counts[pair] += 1
-        if (b + 1) % 20 == 0:
+        if (b + 1) % 100 == 0:
             print(f"[bootstrap_edge_stability] {b+1}/{n_bootstrap} bootstrap completati")
 
     rows = [{"feature_1": p[0], "feature_2": p[1],
