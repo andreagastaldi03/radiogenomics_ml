@@ -33,6 +33,7 @@ import matplotlib.pyplot as plt
 import networkx as nx
 
 import config
+import radiogenomics as rg
 
 
 # ---------------------------------------------------------------------------
