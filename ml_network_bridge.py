@@ -184,6 +184,40 @@ def plot_importance_vs_centrality(merged: pd.DataFrame, output_path,
     plt.savefig(output_path, dpi=150, bbox_inches="tight")
     plt.close()
     print(f"[plot_importance_vs_centrality] salvato in {output_path}")
+    
+    
+def plot_top_significant_pairs(result: pd.DataFrame, merged: pd.DataFrame, out_dir,
+                                feature_set: str, fdr_mode: str, top_n: int = 2, n_labels: int = 40):
+    """
+    Il plot di default (plot_importance_vs_centrality con i suoi argomenti
+    di default, degree_weighted x consensus_score) mostra sempre la STESSA
+    coppia di colonne, che quasi mai è la coppia risultata significativa
+    nella tabella 'result' — le due cose vanno tenute distinte, altrimenti
+    si rischia di concludere "non c'è relazione" guardando l'unica coppia
+    su 12 che davvero non ne ha.
+ 
+    Qui si pescano dalla tabella (già ordinata per |rho|) le top_n righe con
+    il q_value più basso e si genera un plot per ciascuna, con nome file
+    che identifica la coppia — così il risultato interessante ha sempre
+    un'immagine associata, non solo una riga di tabella.
+    """
+    if result.empty:
+        print(f"[plot_top_significant_pairs] {feature_set}/{fdr_mode}: tabella vuota, nessun plot.")
+        return
+ 
+    top_rows = result.sort_values("q_value").head(top_n)
+    for _, row in top_rows.iterrows():
+        cent_col, imp_col = row["centrality_metric"], row["importance_metric"]
+        tag = "sig" if row["q_value"] < 0.05 else "top"
+        fname = f"importance_vs_centrality_{feature_set}_{fdr_mode}_{tag}_{cent_col}_vs_{imp_col}.png"
+        plot_importance_vs_centrality(
+            merged, out_dir / fname,
+            centrality_col=cent_col, importance_col=imp_col, n_labels=n_labels
+        )
+        flag = "SIGNIFICATIVA (q<0.05)" if row["q_value"] < 0.05 else "non significativa, ma la più vicina"
+        print(f"[plot_top_significant_pairs] {cent_col} x {imp_col}: rho={row['rho']:.3f}, "
+              f"q={row['q_value']:.4f} -> {flag}")
+
 
 
 # ---------------------------------------------------------------------------
@@ -328,17 +362,26 @@ if __name__ == "__main__":
     out_dir = config.OUTPUT_DIR / "network" / "ml_bridge"
     out_dir.mkdir(parents=True, exist_ok=True)
 
-    print("\n" + "=" * 70)
-    print("1) IMPORTANZA ML <-> CENTRALITÀ DI RETE")
-    print("=" * 70)
-    for feature_set in ("stable", "neutral"): 
+    for feature_set in ("stable", "neutral"):
         for fdr_mode in ("unified", "separate"):
-            print(f"\nfeature_set='{feature_set}', fdr_mode='{fdr_mode}'")
+            print("\n" + "=" * 70)
+            print(f"1) IMPORTANZA ML <-> CENTRALITÀ DI RETE | feature_set='{feature_set}', "
+                  f"fdr_mode='{fdr_mode}'")
+            print("=" * 70)
             corr_table, merged = ml_importance_vs_centrality(feature_set=feature_set, fdr_mode=fdr_mode)
             corr_table.to_csv(out_dir / f"ml_importance_vs_centrality_{feature_set}_{fdr_mode}.csv",
-                              index=False)
-            merged.to_csv(out_dir / f"ml_importance_vs_centrality_merged_table_{feature_set}_{fdr_mode}.csv")
-            plot_importance_vs_centrality(merged, out_dir / f"importance_vs_degree_{feature_set}_{fdr_mode}.png")
+                               index=False)
+            merged.to_csv(out_dir / f"ml_importance_vs_centrality_merged_{feature_set}_{fdr_mode}.csv")
+ 
+            # il plot di default (degree_weighted x consensus_score) va sempre generato per
+            # coerenza visiva tra le 4 combinazioni, ma quasi mai è la coppia interessante:
+            plot_importance_vs_centrality(
+                merged, out_dir / f"importance_vs_degree_{feature_set}_{fdr_mode}.png"
+            )
+            # questa invece pesca dalla tabella la coppia con q_value più basso, qualunque essa
+            # sia — è quella che va effettivamente guardata per giudicare se c'è un legame
+            plot_top_significant_pairs(corr_table, merged, out_dir, feature_set, fdr_mode, top_n=2)
+
 
     print("\n" + "=" * 70)
     print("2) RETE 'stable' vs RETE 'neutral'")
