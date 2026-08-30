@@ -408,7 +408,7 @@ if __name__ == "__main__":
             print("\n" + "=" * 70)
             print("JACKKNIFE LEAVE-ONE-OUT SUI PAZIENTI")
             print("=" * 70)
-            jk_edge_df, jk_patient_df = jackknife_edge_stability(rad_df, gene_df, fdr_mode=FDR_MODE)
+            jk_edge_df, jk_patient_df = jackknife_edge_stability(rad_df, gene_df, fdr_mode=fdr_mode)
             jk_edge_df.to_csv(out_dir / "edge_stability_jackknife.csv", index=False)
             jk_patient_df.to_csv(out_dir / "patient_influence_jackknife.csv", index=False)
             plot_jackknife_edge_stability(jk_edge_df, out_dir / "edge_stability_jackknife.png")
