@@ -406,46 +406,13 @@ if __name__ == "__main__":
             plot_edge_stability(stability_df, out_dir / "edge_stability.png")
             
             print("\n" + "=" * 70)
-        print("JACKKNIFE LEAVE-ONE-OUT SUI PAZIENTI")
-        print("=" * 70)
-        jk_edge_df, jk_patient_df = jackknife_edge_stability(rad_df, gene_df, fdr_mode=FDR_MODE)
-        jk_edge_df.to_csv(out_dir / "edge_stability_jackknife.csv", index=False)
-        jk_patient_df.to_csv(out_dir / "patient_influence_jackknife.csv", index=False)
-        plot_jackknife_edge_stability(jk_edge_df, out_dir / "edge_stability_jackknife.png")
-        plot_patient_influence(jk_patient_df, out_dir / "patient_influence.png")
- 
-        print("\n" + "=" * 70)
-        print("RETE CONFERMATA (FDR + stabilità bootstrap)")
-        print("=" * 70)
-        G_confirmed = build_confirmed_graph(G, stability_df, stability_threshold=0.5)
-        confirmed_stats = na.compute_network_stats(G_confirmed)
-        confirmed_stats.to_csv(out_dir / "network_confirmed_node_stats.csv", index=False)
-        na.plot_network(G_confirmed, confirmed_stats, out_dir / "network_confirmed_plot.png")
-        nx.write_graphml(G_confirmed, out_dir / "network_confirmed.graphml")
- 
-        with open(out_dir / "network_diagnostics_summary.txt", "w") as f:
-            f.write(f"Nodi: {G.number_of_nodes()} | Archi: {G.number_of_edges()} | "
-                    f"Densità: {nx.density(G):.4f}\n")
-            f.write(f"Assortatività per dominio (rad/gen): "
-                    f"{nx.attribute_assortativity_coefficient(G, 'domain'):.4f}\n")
-            if null_modularity is not None:
-                f.write(f"Modularità osservata: {observed_modularity:.4f} | "
-                        f"nulla: {null_modularity.mean():.4f} ± {null_modularity.std():.4f} | "
-                        f"p-value: {p_value:.4f}\n")
-            n_stable = int((stability_df['selection_frequency'] >= 0.5).sum())
-            f.write(f"Archi stabili (selection_frequency >= 0.5 su bootstrap): "
-                    f"{n_stable}/{len(stability_df)}\n")
-            if len(jk_patient_df) > 0:
-                f.write(f"Jackknife: frazione media archi persistenti = "
-                         f"{jk_edge_df['frac_present_loo'].mean():.3f} | "
-                         f"paziente più influente = {jk_patient_df.iloc[0]['patient']} "
-                         f"({jk_patient_df.iloc[0]['n_edges_broken']} archi rotti, "
-                         f"{jk_patient_df.iloc[0]['frac_edges_broken']*100:.1f}%)\n")
-            f.write(f"Rete confermata (FDR + bootstrap): {G_confirmed.number_of_nodes()} nodi, "
-                    f"{G_confirmed.number_of_edges()} archi\n")
- 
-        print(f"\nTutti i risultati sono stati salvati in: {out_dir}")
-
+            print("JACKKNIFE LEAVE-ONE-OUT SUI PAZIENTI")
+            print("=" * 70)
+            jk_edge_df, jk_patient_df = jackknife_edge_stability(rad_df, gene_df, fdr_mode=FDR_MODE)
+            jk_edge_df.to_csv(out_dir / "edge_stability_jackknife.csv", index=False)
+            jk_patient_df.to_csv(out_dir / "patient_influence_jackknife.csv", index=False)
+            plot_jackknife_edge_stability(jk_edge_df, out_dir / "edge_stability_jackknife.png")
+            plot_patient_influence(jk_patient_df, out_dir / "patient_influence.png")
  
             print("\n" + "=" * 70)
             print("RETE CONFERMATA (FDR + stabilità bootstrap)")
@@ -468,6 +435,12 @@ if __name__ == "__main__":
                 n_stable = int((stability_df['selection_frequency'] >= 0.5).sum())
                 f.write(f"Archi stabili (selection_frequency >= 0.5 su bootstrap): "
                         f"{n_stable}/{len(stability_df)}\n")
+                if len(jk_patient_df) > 0:
+                    f.write(f"Jackknife: frazione media archi persistenti = "
+                             f"{jk_edge_df['frac_present_loo'].mean():.3f} | "
+                             f"paziente più influente = {jk_patient_df.iloc[0]['patient']} "
+                             f"({jk_patient_df.iloc[0]['n_edges_broken']} archi rotti, "
+                             f"{jk_patient_df.iloc[0]['frac_edges_broken']*100:.1f}%)\n")
                 f.write(f"Rete confermata (FDR + bootstrap): {G_confirmed.number_of_nodes()} nodi, "
                         f"{G_confirmed.number_of_edges()} archi\n")
  
