@@ -117,27 +117,68 @@ def ml_importance_vs_centrality(feature_set: str = "stable", fdr_mode: str = "un
                          "rho": rho, "p_value": p, "n": len(sub)})
 
     result = pd.DataFrame(rows).sort_values("rho", key=lambda s: s.abs(), ascending=False)
-    print("\n[ml_importance_vs_centrality] correlazioni centralità di rete <-> importanza ML:")
+    result["q_value"] = rg._benjamini_hochberg(result["p_value"].to_numpy())
+    print("\n[ml_importance_vs_centrality] correlazioni centralità di rete <-> importanza ML "
+          "(q_value = p corretto per i 12 test):")
     print(result.to_string(index=False))
+    n_sig = int((result["q_value"] < 0.05).sum())
+    print(f"[ml_importance_vs_centrality] {n_sig}/{len(result)} combinazioni restano "
+          f"significative dopo correzione FDR (q<0.05).")
 
     return result, merged
 
 
 def plot_importance_vs_centrality(merged: pd.DataFrame, output_path,
                                    centrality_col: str = "degree_weighted",
-                                   importance_col: str = "consensus_score"):
-    sub = merged[[centrality_col, importance_col]].dropna()
+                                   importance_col: str = "consensus_score",
+                                   n_labels: int = 40):
+    """
+    Scatter + legenda separata: con qualche decina di feature, i nomi
+    scritti vicino ai punti si sovrappongono nelle zone dense dello
+    scatter (stesso problema già risolto in network_analysis.plot_network).
+    Ogni punto è marcato con un numero piccolo; la legenda numero->nome sta
+    in un pannello a fianco, mai sovrapposta ai dati. Se le feature sono
+    più di n_labels, mostra solo le n_labels più estreme su
+    centrality_col (le più informative da identificare singolarmente) e
+    lascia gli altri punti senza numero.
+    """
+    sub = merged[[centrality_col, importance_col]].dropna().copy()
+ 
+    # ordina per centralità: assegna i numeri partendo dai punti più
+    # estremi (più interessanti da identificare), il resto resta senza
+    # etichetta se n_labels è più piccolo del numero di feature disponibili
+    order = sub[centrality_col].sort_values(ascending=False).index
+    labeled = list(order[:n_labels])
+    rank_of = {feat: i + 1 for i, feat in enumerate(labeled)}
+ 
     rho, p = spearmanr(sub[centrality_col], sub[importance_col])
-
-    plt.figure(figsize=(7.5, 6.5))
-    plt.scatter(sub[importance_col], sub[centrality_col], color="#4C72B0", alpha=0.8, s=40)
-    for feat, row in sub.iterrows():
-        plt.annotate(feat.split("__", 1)[-1], (row[importance_col], row[centrality_col]),
-                     fontsize=7, alpha=0.7, xytext=(3, 3), textcoords="offset points")
-    plt.xlabel(importance_col)
-    plt.ylabel(centrality_col)
-    plt.title(f"Importanza ML vs centralità di rete\n"
-              f"Spearman rho={rho:.3f}, p={p:.4f}, n={len(sub)}")
+ 
+    fig, (ax_sc, ax_legend) = plt.subplots(
+        1, 2, figsize=(13, 7.5), gridspec_kw={"width_ratios": [3, 1.1]}
+    )
+ 
+    ax_sc.scatter(sub[importance_col], sub[centrality_col], color="#4C72B0",
+                  alpha=0.85, s=60, zorder=2)
+    for feat in labeled:
+        row = sub.loc[feat]
+        ax_sc.annotate(str(rank_of[feat]), (row[importance_col], row[centrality_col]),
+                        fontsize=8, fontweight="bold", color="white",
+                        ha="center", va="center", zorder=3)
+    ax_sc.set_xlabel(importance_col)
+    ax_sc.set_ylabel(centrality_col)
+    ax_sc.set_title(f"Importanza ML vs centralità di rete\n"
+                     f"Spearman rho={rho:.3f}, p={p:.4f}, n={len(sub)}")
+ 
+    ax_legend.axis("off")
+    legend_lines = [f"{rank_of[feat]:>2}.  {feat.split('__', 1)[-1]}" for feat in labeled]
+    ax_legend.text(0, 1, "\n".join(legend_lines), fontsize=8.5, va="top", ha="left",
+                    family="monospace", transform=ax_legend.transAxes)
+    n_unlabeled = len(sub) - len(labeled)
+    title = f"Top {len(labeled)} per\n{centrality_col}"
+    if n_unlabeled > 0:
+        title += f"\n(+{n_unlabeled} punti senza numero)"
+    ax_legend.set_title(title, fontsize=9.5, loc="left")
+ 
     plt.tight_layout()
     plt.savefig(output_path, dpi=150, bbox_inches="tight")
     plt.close()

@@ -248,6 +248,131 @@ def build_confirmed_graph(G: nx.Graph, stability_df: pd.DataFrame,
     return G_confirmed
 
 
+# ---------------------------------------------------------------------------
+# 3) JACKKNIFE LEAVE-ONE-OUT: un singolo paziente regge da solo la struttura?
+# ---------------------------------------------------------------------------
+def jackknife_edge_stability(rad_df: pd.DataFrame, gene_df: pd.DataFrame,
+                              method: str = None, fdr_mode: str = None,
+                              fdr_alpha: float = None) -> tuple:
+    """
+    Diverso dal bootstrap: qui non si ricampiona con reinserimento, si
+    RIMUOVE un paziente alla volta (n run invece di n_bootstrap, quindi più
+    economico) e si rifà l'intera pipeline di correlazione+FDR. Risponde a
+    una domanda diversa e complementare al bootstrap: non "quanto varia la
+    stima ricampionando", ma "esiste un singolo paziente anomalo che da
+    solo tiene in piedi pezzi della struttura osservata?" — un equivalente,
+    per il grafo, del controllo sui punti di leva in una regressione.
+ 
+    Ritorna
+    -------
+    edge_df : un arco osservato per riga, con 'frac_present_loo' = frazione
+        delle n rimozioni in cui l'arco resta sopra soglia FDR.
+    patient_df : un paziente per riga, con 'n_edges_broken' = quanti degli
+        archi osservati SPARISCONO quando quel singolo paziente viene tolto
+        (e la frazione corrispondente sul totale degli archi osservati).
+    """
+    method = method or config.RADIOGENOMICS_CORR_METHOD
+    fdr_mode = fdr_mode or config.NETWORK_FDR_MODE
+    fdr_alpha = config.NETWORK_FDR_ALPHA if fdr_alpha is None else fdr_alpha
+ 
+    observed_edges = na.build_edge_list(rad_df, gene_df, method=method,
+                                         fdr_mode=fdr_mode, fdr_alpha=fdr_alpha)
+    observed_sig = observed_edges[observed_edges["q_value"] < fdr_alpha]
+    observed_pairs = set(zip(observed_sig["feature_1"], observed_sig["feature_2"]))
+    if not observed_pairs:
+        print("[jackknife_edge_stability] nessun arco osservato da validare: nessun run eseguito.")
+        return (pd.DataFrame(columns=["feature_1", "feature_2", "frac_present_loo"]),
+                pd.DataFrame(columns=["patient", "n_edges_broken", "frac_edges_broken"]))
+ 
+    common_idx = rad_df.index.intersection(gene_df.index)
+    rad_df, gene_df = rad_df.loc[common_idx], gene_df.loc[common_idx]
+    patients = list(common_idx)
+    n = len(patients)
+ 
+    print(f"\n[jackknife_edge_stability] {len(observed_pairs)} archi osservati da validare "
+          f"su {n} rimozioni leave-one-out")
+ 
+    counts = {pair: 0 for pair in observed_pairs}
+    broken_by_patient = {}
+ 
+    for i, patient in enumerate(patients):
+        keep = [p for p in patients if p != patient]
+        rad_loo, gene_loo = rad_df.loc[keep], gene_df.loc[keep]
+ 
+        edges_loo = na.build_edge_list(rad_loo, gene_loo, method=method,
+                                        fdr_mode=fdr_mode, fdr_alpha=fdr_alpha)
+        sig_loo = edges_loo[edges_loo["q_value"] < fdr_alpha]
+        pairs_loo = set(zip(sig_loo["feature_1"], sig_loo["feature_2"]))
+ 
+        n_broken = 0
+        for pair in observed_pairs:
+            if pair in pairs_loo:
+                counts[pair] += 1
+            else:
+                n_broken += 1
+        broken_by_patient[patient] = n_broken
+ 
+        if (i + 1) % 10 == 0:
+            print(f"[jackknife_edge_stability] {i+1}/{n} pazienti rimossi ad uno ad uno")
+ 
+    edge_df = pd.DataFrame([
+        {"feature_1": p[0], "feature_2": p[1], "frac_present_loo": c / n}
+        for p, c in counts.items()
+    ]).sort_values("frac_present_loo")
+ 
+    patient_df = pd.Series(broken_by_patient, name="n_edges_broken").sort_values(ascending=False)
+    patient_df = patient_df.reset_index()
+    patient_df.columns = ["patient", "n_edges_broken"]
+    patient_df["frac_edges_broken"] = patient_df["n_edges_broken"] / len(observed_pairs)
+ 
+    print(f"\n[jackknife_edge_stability] frazione media di archi ancora presenti rimuovendo "
+          f"un singolo paziente: {edge_df['frac_present_loo'].mean():.3f}")
+    print("[jackknife_edge_stability] pazienti la cui rimozione rompe più archi (top 5):")
+    print(patient_df.head(5).to_string(index=False))
+ 
+    top_frac = patient_df.iloc[0]["frac_edges_broken"]
+    if top_frac > 0.3:
+        print(f"[jackknife_edge_stability] ATTENZIONE: il paziente "
+              f"{patient_df.iloc[0]['patient']} da solo rompe il {top_frac*100:.0f}% degli "
+              f"archi osservati — possibile punto di leva (outlier), andrebbe controllato "
+              f"prima di considerare la struttura pienamente robusta.")
+    else:
+        print("[jackknife_edge_stability] nessun paziente singolo è determinante per la "
+              "struttura osservata: la rimozione peggiore rompe comunque meno del 30% "
+              "degli archi.")
+ 
+    return edge_df, patient_df
+
+    
+def plot_jackknife_edge_stability(edge_df: pd.DataFrame, output_path):
+    """Istogramma della frazione di rimozioni leave-one-out in cui ogni arco osservato resta significativo."""
+    plt.figure(figsize=(7, 5))
+    plt.hist(edge_df["frac_present_loo"], bins=20, color="#4C72B0", edgecolor="white")
+    plt.axvline(0.9, color="#C44E52", linestyle="--", linewidth=1.5,
+                label="soglia indicativa di robustezza (0.9)")
+    plt.xlabel("Frazione di rimozioni leave-one-out in cui l'arco resta significativo")
+    plt.ylabel("Numero di archi")
+    plt.title("Sensibilità degli archi osservati alla rimozione di un singolo paziente")
+    plt.legend()
+    plt.tight_layout()
+    plt.savefig(output_path, dpi=150, bbox_inches="tight")
+    plt.close()
+    print(f"[plot_jackknife_edge_stability] salvato in {output_path}")
+ 
+ 
+def plot_patient_influence(patient_df: pd.DataFrame, output_path, top_n: int = 15):
+    """Bar chart dei pazienti la cui rimozione singola rompe più archi osservati."""
+    top = patient_df.head(top_n).sort_values("n_edges_broken")
+    plt.figure(figsize=(7, 0.35 * len(top) + 1.5))
+    plt.barh(top["patient"].astype(str), top["n_edges_broken"], color="#C44E52")
+    plt.xlabel("Numero di archi persi rimuovendo questo singolo paziente")
+    plt.title("Pazienti più \"influenti\" sulla struttura di rete osservata")
+    plt.tight_layout()
+    plt.savefig(output_path, dpi=150, bbox_inches="tight")
+    plt.close()
+    print(f"[plot_patient_influence] salvato in {output_path}")
+
+
 if __name__ == "__main__":
     for feature_set in ("stable", "neutral"): 
         for fdr_mode in ("unified", "separate"):
@@ -279,6 +404,48 @@ if __name__ == "__main__":
             stability_df = bootstrap_edge_stability(rad_df, gene_df, fdr_mode=fdr_mode, n_bootstrap=200)
             stability_df.to_csv(out_dir / "edge_stability_bootstrap.csv", index=False)
             plot_edge_stability(stability_df, out_dir / "edge_stability.png")
+            
+            print("\n" + "=" * 70)
+        print("JACKKNIFE LEAVE-ONE-OUT SUI PAZIENTI")
+        print("=" * 70)
+        jk_edge_df, jk_patient_df = jackknife_edge_stability(rad_df, gene_df, fdr_mode=FDR_MODE)
+        jk_edge_df.to_csv(out_dir / "edge_stability_jackknife.csv", index=False)
+        jk_patient_df.to_csv(out_dir / "patient_influence_jackknife.csv", index=False)
+        plot_jackknife_edge_stability(jk_edge_df, out_dir / "edge_stability_jackknife.png")
+        plot_patient_influence(jk_patient_df, out_dir / "patient_influence.png")
+ 
+        print("\n" + "=" * 70)
+        print("RETE CONFERMATA (FDR + stabilità bootstrap)")
+        print("=" * 70)
+        G_confirmed = build_confirmed_graph(G, stability_df, stability_threshold=0.5)
+        confirmed_stats = na.compute_network_stats(G_confirmed)
+        confirmed_stats.to_csv(out_dir / "network_confirmed_node_stats.csv", index=False)
+        na.plot_network(G_confirmed, confirmed_stats, out_dir / "network_confirmed_plot.png")
+        nx.write_graphml(G_confirmed, out_dir / "network_confirmed.graphml")
+ 
+        with open(out_dir / "network_diagnostics_summary.txt", "w") as f:
+            f.write(f"Nodi: {G.number_of_nodes()} | Archi: {G.number_of_edges()} | "
+                    f"Densità: {nx.density(G):.4f}\n")
+            f.write(f"Assortatività per dominio (rad/gen): "
+                    f"{nx.attribute_assortativity_coefficient(G, 'domain'):.4f}\n")
+            if null_modularity is not None:
+                f.write(f"Modularità osservata: {observed_modularity:.4f} | "
+                        f"nulla: {null_modularity.mean():.4f} ± {null_modularity.std():.4f} | "
+                        f"p-value: {p_value:.4f}\n")
+            n_stable = int((stability_df['selection_frequency'] >= 0.5).sum())
+            f.write(f"Archi stabili (selection_frequency >= 0.5 su bootstrap): "
+                    f"{n_stable}/{len(stability_df)}\n")
+            if len(jk_patient_df) > 0:
+                f.write(f"Jackknife: frazione media archi persistenti = "
+                         f"{jk_edge_df['frac_present_loo'].mean():.3f} | "
+                         f"paziente più influente = {jk_patient_df.iloc[0]['patient']} "
+                         f"({jk_patient_df.iloc[0]['n_edges_broken']} archi rotti, "
+                         f"{jk_patient_df.iloc[0]['frac_edges_broken']*100:.1f}%)\n")
+            f.write(f"Rete confermata (FDR + bootstrap): {G_confirmed.number_of_nodes()} nodi, "
+                    f"{G_confirmed.number_of_edges()} archi\n")
+ 
+        print(f"\nTutti i risultati sono stati salvati in: {out_dir}")
+
  
             print("\n" + "=" * 70)
             print("RETE CONFERMATA (FDR + stabilità bootstrap)")
