@@ -333,7 +333,7 @@ if __name__ == "__main__":
     print("=" * 70)
     for feature_set in ("stable", "neutral"): 
         for fdr_mode in ("unified", "separate"):
-            print(f"feature_set='{feature_set}', fdr_mode='{fdr_mode}'")
+            print(f"\nfeature_set='{feature_set}', fdr_mode='{fdr_mode}'")
             corr_table, merged = ml_importance_vs_centrality(feature_set=feature_set, fdr_mode=fdr_mode)
             corr_table.to_csv(out_dir / f"ml_importance_vs_centrality_{feature_set}_{fdr_mode}.csv",
                               index=False)
