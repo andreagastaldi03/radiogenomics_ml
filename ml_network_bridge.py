@@ -14,7 +14,7 @@ Due analisi:
 
 2) LA SELEZIONE ML È "CASUALE" RISPETTO ALLA STRUTTURA GENERALE DEL DATASET?
    (stable_vs_neutral_overlap)
-   Sulla rete "neutral" (nodi = TUTTE le feature dopo sola riduzione,
+   Sulla rete "neutral" (nodi = tutte le feature dopo sola riduzione,
    nessun filtro legato alla label): le feature che il modello ML ha
    giudicato "stabili" hanno grado più alto, nello stesso identico grafo,
    di quelle che ha scartato? Mann-Whitney U (non parametrico, coerente
@@ -206,6 +206,7 @@ def stable_vs_neutral_overlap(fdr_mode: str = "unified", data_source: str = "bot
     nodes_stable, nodes_neutral = set(G_stable.nodes()), set(G_neutral.nodes())
     jaccard_nodes = (len(nodes_stable & nodes_neutral) / len(nodes_stable | nodes_neutral)
                      if (nodes_stable | nodes_neutral) else np.nan)
+        # sta facendo intersezione (&) diviso unione (/)
 
     common_nodes = nodes_stable & nodes_neutral
     edges_stable = {tuple(sorted(e)) for e in G_stable.edges()
@@ -214,6 +215,7 @@ def stable_vs_neutral_overlap(fdr_mode: str = "unified", data_source: str = "bot
                       if e[0] in common_nodes and e[1] in common_nodes}
     union_edges = edges_stable | edges_neutral
     jaccard_edges = len(edges_stable & edges_neutral) / len(union_edges) if union_edges else np.nan
+        # jaccard rappresenta "elementi condivisi" / "elementi presenti complessivamente almeno in uno dei due insiemi".
 
     print(f"[stable_vs_neutral_overlap] nodi: stable={len(nodes_stable)}, "
           f"neutral={len(nodes_neutral)}, comuni={len(common_nodes)} | "
@@ -225,8 +227,8 @@ def stable_vs_neutral_overlap(fdr_mode: str = "unified", data_source: str = "bot
     else:
         print("[stable_vs_neutral_overlap] nessun arco tra nodi comuni in nessuna delle due reti.")
 
-    # confronto di centralità DENTRO la rete neutral: le feature "stabili"
-    # per il ML hanno grado più alto delle altre, nello STESSO grafo?
+    # confronto di centralità dentro la rete neutral: le feature "stabili"
+    # per il ML hanno grado più alto delle altre, nello stesso grafo?
     consensus = _load_consensus(data_source)
     neutral_stats = _load_network_node_stats("neutral", fdr_mode).set_index("feature")
     neutral_stats = neutral_stats.drop(
@@ -235,12 +237,32 @@ def stable_vs_neutral_overlap(fdr_mode: str = "unified", data_source: str = "bot
     neutral_stats["n_criteria_present"] = neutral_stats["n_criteria_present"].fillna(0)
     neutral_stats["is_ml_stable"] = neutral_stats["n_criteria_present"] >= config.RADIOGENOMICS_MIN_CRITERIA
 
-    deg_stable = neutral_stats.loc[neutral_stats["is_ml_stable"], "degree_weighted"]
+    deg_stable = neutral_stats.loc[neutral_stats["is_ml_stable"], "degree_weighted"] 
+        # La sintassi di base è df.loc[righe, colonne]. Scegli solo le righe con True come riga, ne prendi il valore colonna.
     deg_other = neutral_stats.loc[~neutral_stats["is_ml_stable"], "degree_weighted"]
 
     mw_result = None
     if len(deg_stable) >= 3 and len(deg_other) >= 3:
         u_stat, p_value = mannwhitneyu(deg_stable, deg_other, alternative="two-sided")
+            # The Mann-Whitney U test is a nonparametric test of the null hypothesis that the distribution underlying sample x 
+            # is the same as the distribution underlying sample y. It is often used as a test of difference in location 
+            # between distributions. Param alternative{‘two-sided’, ‘less’, ‘greater’}, defines the alternative hypothesis.
+            # Default is ‘two-sided’. Let SX(u) and SY(u) be the survival functions of the distributions underlying x and y,
+            # respectively. ‘two-sided’: the distributions are not equal
+            # i valori di un gruppo tendono a essere sistematicamente più alti o più bassi dei valori dell'altro?
+            # È un test non parametrico per confrontare due gruppi indipendenti.
+            # H0 (hp di base): degree stable e degree other provengono dalla stessa distribuzione; contro: H1: le 
+            # due distribuzioni differiscono. Li ordina e guarda i rank, il test quantifica quanto sarebbe improbabile 
+            # ottenere una separazione dei rank così forte se i due gruppi fossero realmente uguali.
+            # restituisce due cose: u_stat, è la statistica U del test, è principalmente un valore intermedio utilizzato 
+            # per costruire l'inferenza. p_value, è la parte inferenziale.
+            # La U può essere interpretata come il numero di confronti a coppie in cui un gruppo tende a precedere l'altro. In
+            # generale U va da 0 a n_a * n_b, dove n_a/n_b sono il numero di osservazioni nel gruppo A/B. Se tutti i confronti
+            # sono vinti da B allora sarà prossimo a 0, e viceversa.
+            # U descrive quanto i rank dei due gruppi sono separati.
+            # p-value dice che una separazione almeno così forte sarebbe poco compatibile con H0.
+            # mediane ti dicono la direzione e una misura semplice della posizione dei due gruppi.
+
         mw_result = {"u_statistic": float(u_stat), "p_value": float(p_value),
                      "median_degree_stable": float(deg_stable.median()),
                      "median_degree_other": float(deg_other.median()),
@@ -253,7 +275,7 @@ def stable_vs_neutral_overlap(fdr_mode: str = "unified", data_source: str = "bot
             direction = "più" if deg_stable.median() > deg_other.median() else "meno"
             print(f"[stable_vs_neutral_overlap] Le feature giudicate stabili dal modello ML "
                   f"sono significativamente {direction} centrali nella rete generale: "
-                  f"la selezione ML NON è indipendente dalla struttura di rete.")
+                  f"la selezione ML non è indipendente dalla struttura di rete.")
         else:
             print("[stable_vs_neutral_overlap] Nessuna differenza significativa: sulla base di "
                   "questo campione, la centralità nella rete generale non distingue le feature "
@@ -307,12 +329,16 @@ if __name__ == "__main__":
     out_dir.mkdir(parents=True, exist_ok=True)
 
     print("\n" + "=" * 70)
-    print("1) IMPORTANZA ML <-> CENTRALITÀ DI RETE (rete 'stable')")
+    print("1) IMPORTANZA ML <-> CENTRALITÀ DI RETE")
     print("=" * 70)
-    corr_table, merged = ml_importance_vs_centrality(feature_set="stable")
-    corr_table.to_csv(out_dir / "ml_importance_vs_centrality.csv", index=False)
-    merged.to_csv(out_dir / "ml_importance_vs_centrality_merged_table.csv")
-    plot_importance_vs_centrality(merged, out_dir / "importance_vs_degree.png")
+    for feature_set in ("stable", "neutral"): 
+        for fdr_mode in ("unified", "separate"):
+            print(f"feature_set='{feature_set}', fdr_mode='{fdr_mode}'")
+            corr_table, merged = ml_importance_vs_centrality(feature_set=feature_set, fdr_mode=fdr_mode)
+            corr_table.to_csv(out_dir / f"ml_importance_vs_centrality_{feature_set}_{fdr_mode}.csv",
+                              index=False)
+            merged.to_csv(out_dir / f"ml_importance_vs_centrality_merged_table_{feature_set}_{fdr_mode}.csv")
+            plot_importance_vs_centrality(merged, out_dir / f"importance_vs_degree_{feature_set}_{fdr_mode}.png")
 
     print("\n" + "=" * 70)
     print("2) RETE 'stable' vs RETE 'neutral'")

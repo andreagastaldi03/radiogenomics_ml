@@ -92,7 +92,7 @@ def bootstrap_edge_stability(rad_df: pd.DataFrame, gene_df: pd.DataFrame,
         for pair in observed_pairs:
             if pair in pairs_b:
                 counts[pair] += 1
-        if (b + 1) % 100 == 0:
+        if (b + 1) % 50 == 0:
             print(f"[bootstrap_edge_stability] {b+1}/{n_bootstrap} bootstrap completati")
 
     rows = [{"feature_1": p[0], "feature_2": p[1],
@@ -149,7 +149,7 @@ def null_model_comparison(G: nx.Graph, n_null: int = 500,
     print(f"\n[null_model_comparison] grafo osservato: {n_nodes} nodi, {n_edges} archi, "
           f"densità={observed_density:.4f}, modularità={observed_modularity:.4f}")
     print(f"[null_model_comparison] confronto con {n_null} grafi Erdős–Rényi "
-          f"(stessi nodi/archi, senza pesi né struttura)...")
+          f"(stessi nodi/archi, senza pesi né struttura).")
 
     rng = np.random.RandomState(random_state)
     null_modularity = np.empty(n_null)
@@ -253,10 +253,10 @@ def build_confirmed_graph(G: nx.Graph, stability_df: pd.DataFrame,
 # ---------------------------------------------------------------------------
 def jackknife_edge_stability(rad_df: pd.DataFrame, gene_df: pd.DataFrame,
                               method: str = None, fdr_mode: str = None,
-                              fdr_alpha: float = None) -> tuple:
+                              fdr_alpha: float = None, print_info: bool = False) -> tuple:
     """
     Diverso dal bootstrap: qui non si ricampiona con reinserimento, si
-    RIMUOVE un paziente alla volta (n run invece di n_bootstrap, quindi più
+    rimuove un paziente alla volta (n run invece di n_bootstrap, quindi più
     economico) e si rifà l'intera pipeline di correlazione+FDR. Risponde a
     una domanda diversa e complementare al bootstrap: non "quanto varia la
     stima ricampionando", ma "esiste un singolo paziente anomalo che da
@@ -268,7 +268,7 @@ def jackknife_edge_stability(rad_df: pd.DataFrame, gene_df: pd.DataFrame,
     edge_df : un arco osservato per riga, con 'frac_present_loo' = frazione
         delle n rimozioni in cui l'arco resta sopra soglia FDR.
     patient_df : un paziente per riga, con 'n_edges_broken' = quanti degli
-        archi osservati SPARISCONO quando quel singolo paziente viene tolto
+        archi osservati spariscono quando quel singolo paziente viene tolto
         (e la frazione corrispondente sul totale degli archi osservati).
     """
     method = method or config.RADIOGENOMICS_CORR_METHOD
@@ -276,7 +276,7 @@ def jackknife_edge_stability(rad_df: pd.DataFrame, gene_df: pd.DataFrame,
     fdr_alpha = config.NETWORK_FDR_ALPHA if fdr_alpha is None else fdr_alpha
  
     observed_edges = na.build_edge_list(rad_df, gene_df, method=method,
-                                         fdr_mode=fdr_mode, fdr_alpha=fdr_alpha)
+                                         fdr_mode=fdr_mode, fdr_alpha=fdr_alpha, print_info=print_info)
     observed_sig = observed_edges[observed_edges["q_value"] < fdr_alpha]
     observed_pairs = set(zip(observed_sig["feature_1"], observed_sig["feature_2"]))
     if not observed_pairs:
@@ -300,7 +300,7 @@ def jackknife_edge_stability(rad_df: pd.DataFrame, gene_df: pd.DataFrame,
         rad_loo, gene_loo = rad_df.loc[keep], gene_df.loc[keep]
  
         edges_loo = na.build_edge_list(rad_loo, gene_loo, method=method,
-                                        fdr_mode=fdr_mode, fdr_alpha=fdr_alpha)
+                                        fdr_mode=fdr_mode, fdr_alpha=fdr_alpha, print_info=print_info)
         sig_loo = edges_loo[edges_loo["q_value"] < fdr_alpha]
         pairs_loo = set(zip(sig_loo["feature_1"], sig_loo["feature_2"]))
  
@@ -408,7 +408,7 @@ if __name__ == "__main__":
             print("\n" + "=" * 70)
             print("JACKKNIFE LEAVE-ONE-OUT SUI PAZIENTI")
             print("=" * 70)
-            jk_edge_df, jk_patient_df = jackknife_edge_stability(rad_df, gene_df, fdr_mode=fdr_mode)
+            jk_edge_df, jk_patient_df = jackknife_edge_stability(rad_df, gene_df, fdr_mode=fdr_mode, print_info=False)
             jk_edge_df.to_csv(out_dir / "edge_stability_jackknife.csv", index=False)
             jk_patient_df.to_csv(out_dir / "patient_influence_jackknife.csv", index=False)
             plot_jackknife_edge_stability(jk_edge_df, out_dir / "edge_stability_jackknife.png")
