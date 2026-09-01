@@ -7,6 +7,7 @@ __pycache__/
 # Ignora tutti i file CSV e di testo
 *.csv
 *.xlsx
+*.pptx
 NSCLC_Radiogenomica.pdf
 
 # Oppure ignora intere cartelle (consigliato)
