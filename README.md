@@ -33,6 +33,6 @@ La base di codice è organizzata nei seguenti moduli[cite: 1]:
     *   `run_analysis.py` / `run_diagnostics.py` / `run_specification_curve.py`: Script principali per avviare le analisi in batch.
 
 ## Installazione
-Clonare la repository (assicurarsi di aver configurato correttamente le chiavi SSH) e installare le dipendenze in un ambiente virtuale.
+Clonare la repository e installare le dipendenze.
 ```bash
 pip install -r requirements.txt
