@@ -9,6 +9,10 @@ __pycache__/
 *.xlsx
 *.pptx
 NSCLC_Radiogenomica.pdf
+radiogenomicsML.pdf
+radiogenomicsNETWORK.pdf
+radiogenomica_NSCLC_2205.pdf
+presentazione_radiogenomica.pptx
 
 # Oppure ignora intere cartelle (consigliato)
 data/
