@@ -1,59 +1,38 @@
-# Pipeline ML per studio radiogenomico (ADK vs SCC)
+# Radiogenomics Analysis Pipeline
 
-## Logica generale
+## Descrizione del Progetto
+Questa repository contiene una pipeline computazionale per l'analisi radiogenomica. Il framework integra tecniche di Machine Learning e di Network Analysis per estrarre, valutare e interpretare feature complesse. L'obiettivo è fornire un ambiente modulare e riproducibile per l'addestramento dei modelli, la valutazione della loro robustezza e l'analisi relazionale dei dati.
 
-Il problema centrale con questi dati è **n=54 pazienti vs centinaia di feature**.
-Ogni scelta della pipeline è pensata per limitare l'overfitting e per dare stime
-oneste della performance, mantenendo allo stesso tempo un output interpretabile
-(coefficienti, feature stabili) che sarà riusato nello studio di rete.
+## Funzionalità Principali
+*   **Machine Learning Pipeline:** Supporto per l'addestramento, l'ottimizzazione e la validazione incrociata nidificata di modelli predittivi (come Elastic Net, Random Forest, SVM, XGBoost), inclusa l'interpretazione dell'importanza delle feature tramite l'analisi dei valori SHAP.
+*   **Network Analysis:** Costruzione e analisi di reti per esplorare la topologia e le relazioni latenti all'interno dei dati.
+*   **Integrazione ML-Network:** Moduli dedicati per unire le feature estratte dai modelli di apprendimento automatico con le metriche di rete.
+*   **Specification Curve Analysis (SCA):** Strumenti per testare la robustezza delle decisioni analitiche e l'affidabilità dei risultati variando le specifiche del modello.
+*   **Diagnostica e Validazione statistica:** Script per il confronto delle distribuzioni, test di significatività e diagnostica delle performance predittive.
 
-## Struttura dei file
+## Struttura della Repository
+La base di codice è organizzata nei seguenti moduli[cite: 1]:
 
-- `config.py` — tutti i parametri e percorsi in un unico posto. Modifica qui.
-- `data_utils.py` — caricamento dati e **riduzione feature neutra** (varianza +
-  ridondanza via clustering di correlazione). Non guarda mai la label: questo è
-  intenzionale, per evitare circolarità tra selezione e stima delle performance,
-  e per poter riusare lo stesso set ridotto nello studio di rete.
-- `ml_pipeline.py` — nested cross-validation, modelli (Elastic Net, Random Forest,
-  SVM lineare, XGBoost opzionale), stability selection via bootstrap, SHAP.
-- `run_analysis.py` — orchestratore, salva tutti i risultati in `outputs/`.
+*   **Core Machine Learning**
+    *   `ml_pipeline.py`: Moduli per l'addestramento e la validazione dei modelli ML.
+    *   `radiogenomics.py`: Modulo per lo studio delle feature abbandonando il collo di bottiglia dell'etichetta binaria ADK/SCC.
+*   **Core Network Analysis**
+    *   `network_analysis.py`: Logica per la costruzione dei grafi e l'estrazione delle metriche di rete.
+    *   `ml_network_bridge.py`: Interfaccia per la combinazione dei risultati ML e di rete.
+*   **Analisi di Robustezza e Diagnostica**
+    *   `specification_curve.py` / `network_specification_curve.py`: Implementazione della SCA per entrambi i domini.
+    *   `diagnostics.py` / `network_diagnostics.py`: Strumenti per la valutazione delle performance e il controllo di qualità.
+    *   `delong.py`: Implementazione statistica (es. test di DeLong per il confronto delle curve ROC).
+*   **Selezione e Consenso delle Feature**
+    *   `feature_consensus.py` / `consensus_significance.py`: Moduli per valutare la stabilità e la significatività delle feature selezionate.
+*   **Utility e Configurazione**
+    *   `data_utils.py`: Funzioni di supporto per il preprocessing e la manipolazione dei dati.
+    *   `config.py`: Parametri di configurazione globale del progetto.
+    *   `compare_data_sources.py`: Routine per l'allineamento e il confronto di dataset eterogenei.
+*   **Entry Points (Esecuzione)**
+    *   `run_analysis.py` / `run_diagnostics.py` / `run_specification_curve.py`: Script principali per avviare le analisi in batch.
 
-## Come procedere passo-passo
-
-1. **Prepara i dati**: metti in `data/` i tre CSV attesi (`radiomics_features.csv`,
-   `genomics_features.csv`, `labels.csv`) con `patient_id` come chiave comune.
-   Se hai già un unico file, basta adattare `data_utils.load_data()`.
-
-2. **Prima esecuzione**: lancia con `config.DATA_SOURCE = "both"`.
-   ```
-   pip install -r requirements.txt
-   python run_analysis.py
-   ```
-
-3. **Confronta le tre sorgenti dati**: rilancia con `"radiomics"` e `"genomics"`
-   separatamente. Confronta `model_comparison_summary.csv` tra le tre run.
-   Questo confronto — quanto separa ADK/SCC l'imaging da solo, la genomica da
-   sola, o l'integrazione — è già un risultato scientifico rilevante per il tuo
-   obiettivo di caratterizzazione, indipendentemente dalla performance assoluta.
-
-4. **Guarda la stabilità, non solo la performance**: con n=54 la metrica più
-   utile spesso non è l'AUC in sé (che avrà una varianza alta tra fold/seed),
-   ma `stable_features_final.csv` — le feature/geni che l'Elastic Net seleziona
-   consistentemente su centinaia di bootstrap. Sono quelle su cui costruirai
-   l'interpretazione biologica e il collegamento con lo studio di rete.
-
-5. **Ripeti la nested CV con più seed** (vedi `config.RANDOM_SEEDS_MULTI_RUN`):
-   con un campione così piccolo, una singola run di CV può essere fortunata o
-   sfortunata. Se vuoi, posso aggiungerti uno script che itera su più seed e
-   produce un box-plot delle AUC per avere un'idea onesta della variabilità.
-
-## Cose da NON fare (errori comuni con n<<p)
-
-- Non fare feature selection supervisionata (es. filtrare per differenza tra
-  gruppi) su tutto il dataset prima dello split train/test: è leakage, gonfia
-  artificialmente la performance riportata. Nel codice, la selezione supervisionata
-  avviene solo dentro la CV (Elastic Net con L1 dentro ogni fold).
-- Non fidarti di una singola AUC da un singolo split: usa sempre nested CV o
-  ripetizioni multiple.
-- Non concludere che un gene/feature è "importante" da un solo fit: usa la
-  stability selection bootstrap.
+## Installazione
+Clonare la repository (assicurarsi di aver configurato correttamente le chiavi SSH) e installare le dipendenze in un ambiente virtuale.
+```bash
+pip install -r requirements.txt
