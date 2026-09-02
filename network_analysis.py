@@ -259,11 +259,14 @@ def compute_network_stats(G: nx.Graph) -> pd.DataFrame:
     detection tramite modularità greedy (nativa in networkx, nessuna
     dipendenza aggiuntiva rispetto a python-louvain).
     """
+    distances = {(u, v): 1 - d["weight"] for u, v, d in G.edges(data=True)}
+    nx.set_edge_attributes(G, distances, "distance")
+
     degree_weighted = dict(G.degree(weight="weight"))
         # restituisce esclusivamente la somma dei pesi, non include informazioni sul numero 
         # effettivo di collegamenti (il grado non pesato).
         # Quanto è complessivamente forte l'insieme delle connessioni di questa feature?
-    betweenness = nx.betweenness_centrality(G, weight="weight")
+    betweenness = nx.betweenness_centrality(G, weight="distance")
         # Quanto spesso questo nodo si trova lungo i percorsi più brevi che collegano altri nodi?
         # non abbia necessariamente il maggior numero di connessioni, ma potrebbe essere un ponte 
         # tra due moduli biologici/regioni del grafo. La betweenness potrebbe quindi identificare
