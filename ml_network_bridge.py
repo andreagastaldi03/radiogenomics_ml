@@ -187,7 +187,7 @@ def plot_importance_vs_centrality(merged: pd.DataFrame, output_path,
     
     
 def plot_top_significant_pairs(result: pd.DataFrame, merged: pd.DataFrame, out_dir,
-                                feature_set: str, fdr_mode: str, top_n: int = 2, n_labels: int = 40):
+                                feature_set: str, fdr_mode: str, top_n: int = 1, n_labels: int = 40):
     """
     Il plot di default (plot_importance_vs_centrality con i suoi argomenti
     di default, degree_weighted x consensus_score) mostra sempre la STESSA
@@ -205,7 +205,11 @@ def plot_top_significant_pairs(result: pd.DataFrame, merged: pd.DataFrame, out_d
         print(f"[plot_top_significant_pairs] {feature_set}/{fdr_mode}: tabella vuota, nessun plot.")
         return
  
-    top_rows = result.sort_values("q_value").head(top_n)
+    top_rows = (
+        result.assign(_abs_rho=result["rho"].abs())
+        .sort_values(["q_value", "_abs_rho"], ascending=[True, False])
+        .head(top_n)
+    )
     for _, row in top_rows.iterrows():
         cent_col, imp_col = row["centrality_metric"], row["importance_metric"]
         tag = "sig" if row["q_value"] < 0.05 else "top"
@@ -217,7 +221,6 @@ def plot_top_significant_pairs(result: pd.DataFrame, merged: pd.DataFrame, out_d
         flag = "SIGNIFICATIVA (q<0.05)" if row["q_value"] < 0.05 else "non significativa, ma la più vicina"
         print(f"[plot_top_significant_pairs] {cent_col} x {imp_col}: rho={row['rho']:.3f}, "
               f"q={row['q_value']:.4f} -> {flag}")
-
 
 
 # ---------------------------------------------------------------------------
@@ -380,7 +383,7 @@ if __name__ == "__main__":
             )
             # questa invece pesca dalla tabella la coppia con q_value più basso, qualunque essa
             # sia — è quella che va effettivamente guardata per giudicare se c'è un legame
-            plot_top_significant_pairs(corr_table, merged, out_dir, feature_set, fdr_mode, top_n=2)
+            plot_top_significant_pairs(corr_table, merged, out_dir, feature_set, fdr_mode, top_n=1)
 
 
     print("\n" + "=" * 70)
