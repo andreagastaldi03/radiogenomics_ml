@@ -110,7 +110,8 @@ def _percentile_rank(stats_df: pd.DataFrame, node: str, column: str) -> float:
 # ---------------------------------------------------------------------------
 def _run_one_spec(X_raw: pd.DataFrame, spec: dict, data_source: str,
                    fdr_mode: str, fdr_alpha: float, method: str,
-                   n_null: int, random_state: int, print_info: bool = False):
+                   n_null: int, n_assort_perm: int, 
+                   random_state: int, print_info: bool = False):
     """
     Riduce le feature con questa combinazione di parametri, costruisce il
     grafo (rad-rad, gen-gen, rad-gen con correzione FDR), e calcola le
