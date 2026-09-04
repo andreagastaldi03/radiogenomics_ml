@@ -157,7 +157,7 @@ def _run_one_spec(X_raw: pd.DataFrame, spec: dict, data_source: str,
     # --- modularità vs modello nullo Erdos-Rényi ---
     obs_mod, null_mod, p_value = nd.null_model_comparison(G, n_null=n_null,
                                                            random_state=random_state)
-    z = ((obs_mod - null_mod.mean()) / null_mod.std()) if null_mod.std() > 0 else np.nan
+    z_mod = ((obs_mod - null_mod.mean()) / null_mod.std()) if null_mod.std() > 0 else np.nan
 
     # --- assortatività vs modello nullo per permutazione di dominio ---
     obs_assort, _, assort_p, assort_z = nd.domain_assortativity_permutation_test(
