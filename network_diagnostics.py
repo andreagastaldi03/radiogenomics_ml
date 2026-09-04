@@ -249,7 +249,7 @@ def build_confirmed_graph(G: nx.Graph, stability_df: pd.DataFrame,
 
 
 # ---------------------------------------------------------------------------
-# 3) JACKKNIFE LEAVE-ONE-OUT: un singolo paziente regge da solo la struttura?
+# 5) JACKKNIFE LEAVE-ONE-OUT: un singolo paziente regge da solo la struttura?
 # ---------------------------------------------------------------------------
 def jackknife_edge_stability(rad_df: pd.DataFrame, gene_df: pd.DataFrame,
                               method: str = None, fdr_mode: str = None,
@@ -371,6 +371,74 @@ def plot_patient_influence(patient_df: pd.DataFrame, output_path, top_n: int = 1
     plt.savefig(output_path, dpi=150, bbox_inches="tight")
     plt.close()
     print(f"[plot_patient_influence] salvato in {output_path}")
+    
+    
+# ---------------------------------------------------------------------------
+# 6) Modello nullo per assortatività del modello
+# ---------------------------------------------------------------------------
+def domain_assortativity_permutation_test(G, n_permutations: int = None,
+                                           random_state: int = config.RANDOM_STATE):
+    """
+    Variante economica del modello nullo già usato per la modularità
+    (null_model_comparison): invece di generare grafi Erdős–Rényi casuali,
+    si permutano le etichette di DOMINIO (rad/gene) sugli STESSI nodi,
+    tenendo fissa la struttura degli archi, e si ricalcola l'assortatività
+    molte volte. Nessun nuovo grafo da costruire — solo un riassegnamento
+    di attributi — quindi si può permettere un n_permutations alto anche
+    dentro una specification curve.
+
+    Perché serve, anche se l'assortatività è già in [-1, 1]: con proporzioni
+    rad/gene diverse tra specifiche (es. "variance" tiene quasi tutti i
+    geni, "iqr_top_pct" ne tiene pochi), il valore atteso per puro caso non
+    è automaticamente 0 — dipende da quanto sono sbilanciati i due domini
+    in quella rete. Il confronto con il nullo permutato normalizza per
+    questo, rendendo lo z-score comparabile tra specifiche diverse (stessa
+    logica dello z-score sulla modularità).
+
+    Ritorna
+    -------
+    observed : assortatività osservata (NaN se un solo dominio è presente)
+    null_vals : array delle assortatività ottenute permutando le etichette
+    p_value : empirico, a due code
+    z : (observed - null.mean()) / null.std()
+    """
+    n_permutations = n_permutations or config.NETWORK_ASSORTATIVITY_N_PERM
+    nodes = list(G.nodes())
+    original_domains = {n: G.nodes[n]["domain"] for n in nodes}
+    domains_arr = np.array([original_domains[n] for n in nodes])
+
+    try:
+        observed = nx.attribute_assortativity_coefficient(G, "domain")
+    except Exception:
+        # un solo dominio presente: assortatività non definita
+        return np.nan, np.array([]), np.nan, np.nan
+
+    rng = np.random.RandomState(random_state)
+    null_vals = np.full(n_permutations, np.nan)
+    for i in range(n_permutations):
+        perm = rng.permutation(domains_arr)
+        nx.set_node_attributes(G, dict(zip(nodes, perm)), "domain")
+        try:
+            null_vals[i] = nx.attribute_assortativity_coefficient(G, "domain")
+        except Exception:
+            pass  # resta NaN, filtrato sotto
+    nx.set_node_attributes(G, original_domains, "domain")  # ripristina sempre, anche in caso di errori sopra
+
+    null_vals = null_vals[~np.isnan(null_vals)]
+    if len(null_vals) == 0 or np.isnan(observed):
+        return observed, null_vals, np.nan, np.nan
+
+    null_std = null_vals.std()
+    z = (observed - null_vals.mean()) / null_std if null_std > 0 else np.nan
+    b = int(np.sum(np.abs(null_vals) >= abs(observed)))
+    p_value = (b + 1) / (len(null_vals) + 1)
+
+    print(f"[domain_assortativity_permutation_test] assortatività osservata={observed:.4f} | "
+          f"nulla (permutata)={null_vals.mean():.4f}±{null_vals.std():.4f} | "
+          f"z={z:.2f} | p={p_value:.4f} ({n_permutations} permutazioni)")
+
+    return observed, null_vals, p_value, z
+
 
 
 if __name__ == "__main__":

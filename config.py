@@ -209,3 +209,12 @@ NETWORK_FDR_ALPHA = 0.05        # soglia sul q-value per includere un arco nel g
 # della griglia, non una volta sola. 200 basta a stimare media/sd della
 # modularità nulla con precisione più che sufficiente per uno z-score.
 NETWORK_SPEC_CURVE_N_NULL = 200
+
+# Quante permutazioni delle etichette di dominio (rad/gene) generare per il
+# test di significatività sull'assortatività (domain_assortativity_
+# permutation_test in network_diagnostics.py): a differenza del modello
+# nullo sulla modularità, qui non si generano nuovi grafi — solo un
+# riassegnamento di attributi sugli stessi nodi — quindi ci si può
+# permettere un numero alto senza costi rilevanti.
+NETWORK_ASSORTATIVITY_N_PERM = 1000
+
