@@ -272,7 +272,8 @@ def run_network_specification_curve(spec_grid: dict = None, data_source: str = "
     edge_votes.index = pd.MultiIndex.from_tuples(edge_votes.index, names=["feature_1", "feature_2"])
 
     n_valid_rows = spec_df["modularity_z"].notna().sum()
-        print(f"\n[run_network_specification_curve] {n_valid_rows}/{len(spec_df)} specifiche con "
+    n_tpi1_present = spec_df["tpi1_degree_percentile"].notna().sum()
+    print(f"\n[run_network_specification_curve] {n_valid_rows}/{len(spec_df)} specifiche con "
           f"rete non vuota | modularity_z: mediana={spec_df['modularity_z'].median():.2f} | "
           f"assortativity_z: mediana={spec_df['assortativity_z'].median():.2f} | "
           f"{TRACKED_NODE} presente e non isolato in {n_tpi1_present}/{len(spec_df)} specifiche")
