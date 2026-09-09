@@ -46,7 +46,7 @@ SPEC_GRID = {
 # comunque tutte e tre le sorgenti dati (è la scelta più rilevante per
 # l'interpretazione) ed entrambi i modelli.
 REDUCED_SPEC_GRID = {
-    "data_source": ["radiomics", "genomics", "both"],
+    "data_source": ["genomics", "both"],
     "gene_selection_method": ["variance", "iqr_top_pct"],
     "exclude_shape": [True, False],
     "redundancy_corr_threshold": [0.90],
