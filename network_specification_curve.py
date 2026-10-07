@@ -111,7 +111,8 @@ def _percentile_rank(stats_df: pd.DataFrame, node: str, column: str) -> float:
 def _run_one_spec(X_raw: pd.DataFrame, spec: dict, data_source: str,
                    fdr_mode: str, fdr_alpha: float, method: str,
                    n_null: int, n_assort_perm: int, 
-                   random_state: int, print_info: bool = False):
+                   random_state: int, print_info: bool = False,
+                   graphs_dir = None):
     """
     Riduce le feature con questa combinazione di parametri, costruisce il
     grafo (rad-rad, gen-gen, rad-gen con correzione FDR), e calcola le
@@ -137,6 +138,7 @@ def _run_one_spec(X_raw: pd.DataFrame, spec: dict, data_source: str,
         "domain_assortativity": np.nan, "assortativity_z": np.nan,
         "assortativity_p_value": np.nan,
         "tpi1_degree_percentile": np.nan, "tpi1_betweenness_percentile": np.nan,
+        "tpi1_degree_weighted": np.nan, "tpi1_betweenness": np.nan,
     }
 
     if rad_df.shape[1] < 2 or gene_df.shape[1] < 2:
@@ -153,6 +155,10 @@ def _run_one_spec(X_raw: pd.DataFrame, spec: dict, data_source: str,
     if G.number_of_edges() == 0:
         row.update({**empty_metrics, "n_nodes": 0, "n_edges": 0})
         return row, G
+    
+    if graphs_dir is not None:
+        graph_path = graphs_dir / f"{_spec_id(spec, fdr_mode)}.graphml"
+        nx.write_graphml(G, graph_path)
 
     # --- modularità vs modello nullo Erdos-Rényi ---
     obs_mod, null_mod, p_value = nd.null_model_comparison(G, n_null=n_null,
@@ -164,12 +170,16 @@ def _run_one_spec(X_raw: pd.DataFrame, spec: dict, data_source: str,
         G, n_permutations=n_assort_perm, random_state=random_state
     )
 
-    # --- rank percentile di TPI1 o del nodo tracciato ---
+    # --- rank percentile di TPI1 o del nodo tracciato, più valori grezzi ---
     tpi1_degree_pct, tpi1_betw_pct = np.nan, np.nan
+    tpi1_degree_weighted, tpi1_betweenness = np.nan, np.nan
     try:
         stats_df = na.compute_network_stats(G).set_index("feature")
         tpi1_degree_pct = _percentile_rank(stats_df, TRACKED_NODE, "degree_weighted")
         tpi1_betw_pct = _percentile_rank(stats_df, TRACKED_NODE, "betweenness")
+        if TRACKED_NODE in stats_df.index:
+            tpi1_degree_weighted = float(stats_df.loc[TRACKED_NODE, "degree_weighted"])
+            tpi1_betweenness = float(stats_df.loc[TRACKED_NODE, "betweenness"])
     except Exception as e:
         print(f"[_run_one_spec] ATTENZIONE: calcolo del rank di {TRACKED_NODE} fallito per "
               f"{spec} ({type(e).__name__}: {e}) — colonne lasciate NaN per questa specifica.")
@@ -191,9 +201,18 @@ def _run_one_spec(X_raw: pd.DataFrame, spec: dict, data_source: str,
         "assortativity_p_value": assort_p,
         "tpi1_degree_percentile": tpi1_degree_pct,
         "tpi1_betweenness_percentile": tpi1_betw_pct,
+        "tpi1_degree_weighted": tpi1_degree_weighted,
+        "tpi1_betweenness": tpi1_betweenness,
     })
     return row, G
 
+
+def _spec_id(spec:dict, fdr_mode: str = None) -> str:
+    """Nome file sicuro che codifica la combinazione di specifica (+ fdr_mode)."""
+    parts = [f"{k}-{str(v).replace(' ', '')}" for k, v in spec.items()]
+    if fdr_mode is not None:
+        parts.append(f"fdr-{fdr_mode}")
+    return "_".join(parts)
 
 
 # ---------------------------------------------------------------------------
@@ -204,7 +223,7 @@ def run_network_specification_curve(spec_grid: dict = None, data_source: str = "
                                      method: str = None,
                                      n_null: int = None, n_assort_perm: int = None,
                                      random_state: int = config.RANDOM_STATE,
-                                     print_info: bool = False):
+                                     print_info: bool = False, graphs_dir=None):
     """
     Ritorna
     -------
@@ -226,6 +245,8 @@ def run_network_specification_curve(spec_grid: dict = None, data_source: str = "
     n_assort_perm = n_assort_perm or config.NETWORK_ASSORTATIVITY_N_PERM
 
     X_raw, _ = data_utils.load_data(source=data_source, print_info=False)
+        if graphs_dir is not None:
+        graphs_dir.mkdir(parents=True, exist_ok=True)
 
     keys = list(spec_grid.keys())
     combos = list(itertools.product(*spec_grid.values()))
@@ -243,7 +264,8 @@ def run_network_specification_curve(spec_grid: dict = None, data_source: str = "
         row, G = _run_one_spec(X_raw, spec, data_source=data_source, fdr_mode=fdr_mode,
                                 fdr_alpha=fdr_alpha, method=method, n_null=n_null,
                                 n_assort_perm=n_assort_perm,
-                                random_state=random_state, print_info=print_info)
+                                random_state=random_state, print_info=print_info,
+                                graphs_dir=graphs_dir)
         rows.append(row)
 
         if G is not None and G.number_of_edges() > 0:
@@ -287,6 +309,160 @@ def run_network_specification_curve(spec_grid: dict = None, data_source: str = "
               f"{n_valid_rows} con rete valida — trattato come NaN, non ignorato.")
 
     return spec_df, node_votes, edge_votes
+
+
+# ---------------------------------------------------------------------------
+# GRIGLIA x DUE MODALITÀ FDR: la stessa griglia di preprocessing, lanciata
+# una volta con fdr_mode="unified" e una con fdr_mode="separate", per
+# verificare se l'effetto di "separate" sul ruolo di TPI1 è coerente attraverso 
+# le scelte di preprocessing, o dipende anche da quelle.
+# ---------------------------------------------------------------------------
+def run_network_specification_curve_fdr_comparison(spec_grid: dict = None, 
+                                                   fdr_modes: tuple = ("unified", "separate"),
+                                                   data_source: str = "both", 
+                                                   fdr_alpha: float = None, method: str = None,
+                                                   n_null: int = None, n_assort_perm: int = None,
+                                                   random_state: int = config.RANDOM_STATE, 
+                                                   print_info: bool = False, out_dir = None):
+    """
+    Richiama run_network_specification_curve una volta per ciascun
+    fdr_mode (nessuna duplicazione di logica), tagga ogni risultato con la
+    colonna 'fdr_mode' e concatena. Se out_dir è fornito, salva anche il
+    grafo (graphml) di OGNI combinazione preprocessing x fdr_mode in
+    out_dir/graphs/<fdr_mode>/.
+ 
+    Ritorna
+    -------
+    combined : spec_df di tutte le combinazioni, per ENTRAMBE le modalità
+        FDR (n_combinazioni x len(fdr_modes) righe), con colonna 'fdr_mode'.
+    votes : dict {fdr_mode: (node_votes, edge_votes)} — tenuti separati
+        per modalità, perché i "voti" hanno significato solo all'interno
+        della stessa soglia di correzione.
+    """
+    spec_grid = spec_grid or NETWORK_SPEC_GRID
+    frames = []
+    votes = {}
+ 
+    for fdr_mode in fdr_modes:
+        graphs_dir = (out_dir / "graphs" / fdr_mode) if out_dir is not None else None
+        print(f"\n{'=' * 70}\nFDR MODE = '{fdr_mode}'\n{'=' * 70}")
+        spec_df, node_votes, edge_votes = run_network_specification_curve(
+            spec_grid=spec_grid, data_source=data_source, fdr_mode=fdr_mode,
+            fdr_alpha=fdr_alpha, method=method, n_null=n_null, n_assort_perm=n_assort_perm,
+            random_state=random_state, print_info=print_info, graphs_dir=graphs_dir,
+        )
+        spec_df = spec_df.copy()
+        spec_df["fdr_mode"] = fdr_mode
+        frames.append(spec_df)
+        votes[fdr_mode] = (node_votes, edge_votes)
+ 
+    combined = pd.concat(frames, ignore_index=True)
+ 
+    valid = combined.dropna(subset=["tpi1_betweenness"])
+    if len(valid) > 0:
+        summary = valid.groupby("fdr_mode")[["n_edges", "tpi1_degree_weighted",
+                                              "tpi1_betweenness",
+                                              "tpi1_degree_percentile",
+                                              "tpi1_betweenness_percentile"]].median()
+        print(f"\n[run_network_specification_curve_fdr_comparison] mediane per fdr_mode "
+              f"(su {len(valid)} specifiche valide totali):")
+        print(summary.to_string())
+ 
+    return combined, votes
+
+
+# ---------------------------------------------------------------------------
+# PLOT per il confronto unified vs separate
+# ---------------------------------------------------------------------------
+def plot_fdr_mode_comparison_tpi1(combined: pd.DataFrame, spec_keys: list, output_path):
+    """
+    Confronto APPAIATO: la stessa combinazione di preprocessing collegata
+    da una linea tra il suo risultato con fdr_mode='unified' e con
+    fdr_mode='separate'. Risponde direttamente a "passare a 'separate' fa
+    crescere il ruolo di TPI1, a parità di tutto il resto?" — più diretto
+    del semplice confronto di medie, perché isola l'effetto della sola
+    scelta FDR da quello delle altre scelte di preprocessing.
+    """
+    spec_keys = list(spec_keys)
+    pivot_deg = combined.pivot_table(index=spec_keys, columns="fdr_mode",
+                                      values="tpi1_degree_percentile")
+    pivot_bet = combined.pivot_table(index=spec_keys, columns="fdr_mode",
+                                      values="tpi1_betweenness_percentile")
+ 
+    fig, axes = plt.subplots(1, 2, figsize=(11, 6.5))
+    for ax, pivot, label in zip(
+        axes, [pivot_deg, pivot_bet],
+        [f"grado pesato di {TRACKED_NODE}\n(percentile di rango)",
+         f"betweenness di {TRACKED_NODE}\n(percentile di rango)"]
+    ):
+        pivot = pivot.dropna()
+        if pivot.empty or "unified" not in pivot.columns or "separate" not in pivot.columns:
+            ax.set_title(f"{label}\n(dati insufficienti: servono entrambe le modalità)")
+            ax.axis("off")
+            continue
+        for _, row in pivot.iterrows():
+            color = "#2E7D32" if row["separate"] > row["unified"] else "#B71C1C"
+            ax.plot(["unified", "separate"], [row["unified"], row["separate"]],
+                     color=color, alpha=0.55, marker="o", markersize=7)
+        n_up = int((pivot["separate"] > pivot["unified"]).sum())
+        n_down = int((pivot["separate"] < pivot["unified"]).sum())
+        n_tot = len(pivot)
+        ax.set_ylabel(label)
+        ax.set_ylim(-0.05, 1.05)
+        ax.set_title(f"{n_up}/{n_tot} specifiche: cresce con 'separate' (verde)\n"
+                     f"{n_down}/{n_tot}: cala (rosso)")
+ 
+    plt.suptitle(f"{TRACKED_NODE}: confronto appaiato unified vs separate, "
+                 f"per ciascuna combinazione di preprocessing")
+    plt.tight_layout()
+    plt.savefig(output_path, dpi=150, bbox_inches="tight")
+    plt.close()
+    print(f"[plot_fdr_mode_comparison_tpi1] salvato in {output_path}")
+ 
+ 
+def plot_edges_vs_tpi1_role(combined: pd.DataFrame, output_path):
+    """
+    Grado pesato e betweenness GREZZI (non percentile) di TPI1 in funzione
+    del numero di archi sopravvissuti nella rete, colorati per fdr_mode —
+    con una retta di tendenza (OLS, solo aiuto visivo, non un test) per
+    ciascuna modalità. Risponde a "al calare/crescere della densità della
+    rete, il ruolo di TPI1 si rafforza o si diluisce?"
+    """
+    valid = combined.dropna(subset=["n_edges", "tpi1_degree_weighted", "tpi1_betweenness"])
+    if valid.empty:
+        print("[plot_edges_vs_tpi1_role] nessuna specifica valida (TPI1 sempre assente/isolato).")
+        return
+ 
+    fig, (ax_deg, ax_betw) = plt.subplots(1, 2, figsize=(13, 5.5))
+    markers = {"unified": "o", "separate": "^"}
+    colors = {"unified": "#4C72B0", "separate": "#C44E52"}
+ 
+    for fdr_mode, sub in valid.groupby("fdr_mode"):
+        for ax, col in ((ax_deg, "tpi1_degree_weighted"), (ax_betw, "tpi1_betweenness")):
+            ax.scatter(sub["n_edges"], sub[col], label=fdr_mode,
+                       marker=markers.get(fdr_mode, "o"), color=colors.get(fdr_mode, "gray"),
+                       s=60, alpha=0.8)
+            if len(sub) >= 3:
+                coeffs = np.polyfit(sub["n_edges"], sub[col], 1)
+                xs = np.linspace(sub["n_edges"].min(), sub["n_edges"].max(), 50)
+                ax.plot(xs, np.polyval(coeffs, xs), color=colors.get(fdr_mode, "gray"),
+                        linestyle="--", alpha=0.6, linewidth=1.5)
+ 
+    ax_deg.set_xlabel("Numero di archi sopravvissuti nella rete")
+    ax_deg.set_ylabel(f"Grado pesato di {TRACKED_NODE} (valore grezzo)")
+    ax_deg.set_title("Grado pesato vs densità della rete")
+    ax_deg.legend(title="correzione FDR", fontsize=8)
+ 
+    ax_betw.set_xlabel("Numero di archi sopravvissuti nella rete")
+    ax_betw.set_ylabel(f"Betweenness di {TRACKED_NODE} (valore grezzo)")
+    ax_betw.set_title("Betweenness vs densità della rete")
+    ax_betw.legend(title="correzione FDR", fontsize=8)
+ 
+    plt.suptitle(f"{TRACKED_NODE}: ruolo strutturale in funzione della densità della rete")
+    plt.tight_layout()
+    plt.savefig(output_path, dpi=150, bbox_inches="tight")
+    plt.close()
+    print(f"[plot_edges_vs_tpi1_role] salvato in {output_path}")
 
 
 # ---------------------------------------------------------------------------
@@ -349,7 +525,19 @@ def plot_network_specification_curve(spec_df: pd.DataFrame, spec_keys: list,
 if __name__ == "__main__":
     out_dir = config.OUTPUT_DIR / "network" / "specification_curve"
     out_dir.mkdir(parents=True, exist_ok=True)
+    plots_dir = out_dir / "plots"
+    plots_dir.mkdir(parents=True, exist_ok=True)
+    
+    combined, votes = run_network_specification_curve_fdr_comparison(out_dir=out_dir)
+    
+    combined.to_csv(out_dir / "network_spec_curve_fdr_comparison_results.csv", index=False)
+    for fdr_mode, (node_votes, edge_votes) in votes.items():
+        node_votes.to_csv(out_dir / f"node_votes_across_specs_{fdr_mode}.csv",
+                          header=["frac_specs_present"])
+        edge_votes.to_csv(out_dir / f"edge_votes_across_specs_{fdr_mode}.csv",
+                          header=["frac_specs_present"])
  
+    """
     spec_df, node_votes, edge_votes = run_network_specification_curve()
  
     spec_df.to_csv(out_dir / "network_spec_curve_results.csv", index=False)
@@ -393,5 +581,54 @@ if __name__ == "__main__":
     print(node_votes.head(15))
     print("\nTop 15 archi per frazione di specifiche in cui risultano significativi:")
     print(edge_votes.head(15))
+
+    print(f"\nTutti i risultati sono stati salvati in: {out_dir}")
+    """
+    
+    spec_keys = list(NETWORK_SPEC_GRID.keys())
+ 
+    # un plot "a specification curve" per fdr_mode, sulle metriche già esistenti
+    for fdr_mode in combined["fdr_mode"].unique():
+        sub = combined[combined["fdr_mode"] == fdr_mode]
+        plot_network_specification_curve(
+            sub, spec_keys=spec_keys,
+            output_path=plots_dir / f"spec_curve_modularity_{fdr_mode}.png",
+            metric="modularity_z",
+            ylabel="Modularity z-score\n(vs. Erdős–Rényi a parità di nodi/archi)",
+            title=f"Network specification curve ({fdr_mode}): la struttura a community regge?",
+            show_null_reference=True,
+        )
+        plot_network_specification_curve(
+            sub, spec_keys=spec_keys,
+            output_path=plots_dir / f"spec_curve_assortativity_{fdr_mode}.png",
+            metric="assortativity_z",
+            ylabel="Assortativity z-score\n(vs. permutazione delle etichette di dominio)",
+            title=f"Network specification curve: la segregazione per dominio regge?",
+            show_null_reference=True,
+        )
+        plot_network_specification_curve(
+            sub, spec_keys=spec_keys,
+            output_path=plots_dir / f"spec_curve_{TRACKED_NODE}_betweenness_{fdr_mode}.png",
+            metric="tpi1_betweenness_percentile",
+            ylabel=f"Percentile di rango — betweenness di {TRACKED_NODE}\n(1.0 = nodo più centrale)",
+            title=f"Network specification curve ({fdr_mode}): {TRACKED_NODE} resta un ponte?",
+            show_null_reference=False,
+        )
+        plot_network_specification_curve(
+            sub, spec_keys=spec_keys,
+            output_path=plots_dir / f"spec_curve_{TRACKED_NODE}_degree_weighted_{fdr_mode}.png",
+            metric="tpi1_degree_percentile",
+            ylabel=f"Percentile di rango — grado pesato di {TRACKED_NODE}\n(1.0 = nodo più centrale)",
+            title=f"Network specification curve: quanto resta centrale {TRACKED_NODE}?",
+            show_null_reference=False,
+        )
+ 
+    # i due plot nuovi, pensati apposta per verificare l'affermazione sulle slide
+    plot_fdr_mode_comparison_tpi1(combined, spec_keys,
+                                   plots_dir / f"{TRACKED_NODE}_unified_vs_separate.png")
+    plot_edges_vs_tpi1_role(combined, plots_dir / f"{TRACKED_NODE}_role_vs_density.png")
  
     print(f"\nTutti i risultati sono stati salvati in: {out_dir}")
+    print(f"  grafi (graphml) in: {out_dir / 'graphs'}")
+    print(f"  plot in: {plots_dir}")
+
