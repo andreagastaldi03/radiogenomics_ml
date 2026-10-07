@@ -245,7 +245,7 @@ def run_network_specification_curve(spec_grid: dict = None, data_source: str = "
     n_assort_perm = n_assort_perm or config.NETWORK_ASSORTATIVITY_N_PERM
 
     X_raw, _ = data_utils.load_data(source=data_source, print_info=False)
-        if graphs_dir is not None:
+    if graphs_dir is not None:
         graphs_dir.mkdir(parents=True, exist_ok=True)
 
     keys = list(spec_grid.keys())
