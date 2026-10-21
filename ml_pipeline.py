@@ -60,14 +60,14 @@ def _wants_gpu(use_gpu, name: str) -> bool:
 def get_model_grid(use_gpu=False):
     """
     Restituisce un dizionario {nome_modello: (pipeline, param_grid)}.
-    
+
     use_gpu : bool oppure dict {modello: bool}. DEFAULT False (= comportamento
-    originale su CPU): così qualunque altro modulo che chiama
-    get_model_grid()/build_pipeline_from_best_params() resta invariato.
-    La GPU si attiva solo passando esplicitamente use_gpu
-    (run_all_models lo fa usando gpu_utils.resolve_backends()).
-    Se la GPU richiesta non è disponibile, o il costruttore cuML fallisce,
-    il modello viene costruito su CPU (paracadute).
+        originale su CPU): così qualunque altro modulo che chiama
+        get_model_grid()/build_pipeline_from_best_params() resta invariato.
+        La GPU si attiva solo passando esplicitamente use_gpu
+        (run_all_models lo fa usando gpu_utils.resolve_backends()).
+        Se la GPU richiesta non è disponibile, o il costruttore cuML fallisce,
+        il modello viene costruito su CPU (paracadute).
 
     Elastic Net è il modello principale consigliato: fa selezione automatica
     delle feature (L1) gestendo al contempo la collinearità (L2), ed è
@@ -75,7 +75,7 @@ def get_model_grid(use_gpu=False):
 
     Random Forest e SVM lineare sono inclusi come confronto / cross-check
     dell'importanza delle feature (via feature_importances_ o SHAP).
-    
+
     NB: i nomi dei parametri della griglia (clf__C, clf__l1_ratio, ...) sono
     identici tra CPU e GPU, quindi i best_params trovati su un backend sono
     riutilizzabili sull'altro.
@@ -109,7 +109,6 @@ def get_model_grid(use_gpu=False):
         "clf__l1_ratio": [0.05, 0.1, 0.3, 0.5, 0.7, 0.9],
     }
     models["elastic_net"] = (en_pipe, en_grid)
-
 
     # oggetto pipeline permette di definire in un unico oggetto i vari passaggi necessari all'
     # addestramento del modello. permette di segnare in ordine i vari step, chiamandoli sequenzialmente
@@ -154,7 +153,7 @@ def get_model_grid(use_gpu=False):
             "clf__min_samples_leaf": [1, 3, 5],
         }
     models["random_forest"] = (rf_pipe, rf_grid)
- 
+
     # --- SVM lineare ---
     svm_pipe = None
     if _wants_gpu(use_gpu, "svm_linear"):
@@ -176,7 +175,7 @@ def get_model_grid(use_gpu=False):
         "clf__C": [0.001, 0.01, 0.1, 1, 10],
     }
     models["svm_linear"] = (svm_pipe, svm_grid)
- 
+
     # --- XGBoost (opzionale) ---
     if XGB_AVAILABLE:
         xgb_extra = gpu_utils.xgb_gpu_kwargs() if _wants_gpu(use_gpu, "xgboost") else {}
@@ -192,9 +191,8 @@ def get_model_grid(use_gpu=False):
             "clf__learning_rate": [0.01, 0.05, 0.1], # tasso approfondimento gradient descend 
         }
         models["xgboost"] = (xgb_pipe, xgb_grid)
- 
-    return models
 
+    return models
 
 # eXtreme Gradient Boosting, costruisce alberi decisionali in sequenza (non in parallelo come random
 # forest, dove poi viene presa la media o maggioranza delle risposte). ogni albero decisionale non parte
@@ -261,6 +259,9 @@ def build_pipeline_from_best_params(model_name: str, best_params: dict, use_gpu=
     iperparametri fissato, qualunque sia il tipo di modello — usata per
     rieseguire lo stesso modello "migliore" fuori dalla nested CV (test di
     permutazione, batch effect), senza doverlo hardcodare a elastic_net.
+
+    use_gpu=False di default (CPU): i chiamanti che lanciano molte istanze in
+    processi paralleli (permutazioni, spec curve) non devono condividere la GPU.
     """
     models = get_model_grid(use_gpu=use_gpu)
     if model_name not in models:
@@ -298,7 +299,7 @@ def nested_cv_evaluate(X: pd.DataFrame, y: pd.Series, model_name: str,
                           random_state, search_n_jobs=-1, error_score=np.nan)
     res["backend"] = "cpu"
     return res
- 
+
 
 def _nested_cv_core(X: pd.DataFrame, y: pd.Series, model_name: str,
                     pipe, grid, n_outer, n_inner, random_state,
@@ -306,29 +307,29 @@ def _nested_cv_core(X: pd.DataFrame, y: pd.Series, model_name: str,
     """
     Esegue nested CV per un singolo modello e ritorna metriche per ciascun
     fold esterno + i migliori iperparametri scelti ad ogni fold.
- 
+
     Ritorna un dict con liste di metriche (una entry per fold esterno) e la
     lista dei modelli fittati (utile per estrarre feature importance/SHAP).
     """
     y_bin = (y == config.POSITIVE_CLASS).astype(int) # se y uguale alla classe positiva 1, altrimenti 0
- 
+
     outer_cv = StratifiedKFold(n_splits=n_outer, shuffle=True, random_state=random_state) # mantiene la 
         # stessa proporzione di casi 1 e 0, in modo che non ci siano fold senza esempi di una classe
         # questo Cross Validation è per valutazione prestazioni modello
- 
+
     results = {
         "auc": [], "balanced_accuracy": [], "f1": [],
         "best_params": [], "confusion_matrices": [],
         "fitted_models": [], "test_indices": [],
         "model_name": model_name,
     }
- 
+
     for fold_i, (train_idx, test_idx) in enumerate(outer_cv.split(X, y_bin)):
             # split genera indici di posizione per train e test set, enumerate aggiunge un counter per 
             # tenere conto dell'iterazione che stiamo considerando
         X_train, X_test = X.iloc[train_idx], X.iloc[test_idx]
         y_train, y_test = y_bin.iloc[train_idx], y_bin.iloc[test_idx]
- 
+
         inner_cv = StratifiedKFold(n_splits=n_inner, shuffle=True, random_state=random_state) # creo un 
             # Cross Validation sul train set per tuning degli iperparametri
         search = GridSearchCV(pipe, grid, scoring="roc_auc", cv=inner_cv,
@@ -337,13 +338,13 @@ def _nested_cv_core(X: pd.DataFrame, y: pd.Series, model_name: str,
         search.fit(X_train, y_train) # esegue effettivamente la ricerca, allena il modello sulla 
             # combinazione di iperparametri. una volta trovata quella vincente, riaddestra la pipeline 
             # con quei valori
- 
+
         best_model = search.best_estimator_ # prendo il modello migliore
         y_pred = best_model.predict(X_test) # lo alleno sul test set, estrae la classe (non la prob)
         y_proba = best_model.predict_proba(X_test)[:, 1] # ritorna la probabilità continua, assegnata 
             # alla classe positiva. il metodo restituisce una matrice a due colonne, prob per ogni classe
             # quindi seleziono solo colonna con prob per classe 1
- 
+
         results["auc"].append(roc_auc_score(y_test, y_proba)) # curva roc misura capacità di separare le
             # due classi a qualsiasi soglia di prob. algoritmo prende lista delle prob, varia la soglia
             # di classificazione e confronta predizioni con label y test. a ogni soglia calcola la coppia
@@ -356,19 +357,19 @@ def _nested_cv_core(X: pd.DataFrame, y: pd.Series, model_name: str,
         results["confusion_matrices"].append(confusion_matrix(y_test, y_pred))
         results["fitted_models"].append(best_model)
         results["test_indices"].append(test_idx)
- 
+
         print(f"[{model_name}] fold {fold_i+1}/{n_outer} | "
               f"AUC={results['auc'][-1]:.3f} | "
               f"BalAcc={results['balanced_accuracy'][-1]:.3f} | "
               f"best_params={search.best_params_}")
- 
+
     print(f"\n[{model_name}] RISULTATI NESTED CV (media ± sd su {n_outer} fold esterni)")
     for metric in ["auc", "balanced_accuracy", "f1"]:
         vals = results[metric]
         print(f"  {metric}: {np.mean(vals):.3f} ± {np.std(vals):.3f}")
- 
+
     return results
- 
+
 
 def run_all_models(X: pd.DataFrame, y: pd.Series):
     """
@@ -383,7 +384,6 @@ def run_all_models(X: pd.DataFrame, y: pd.Series):
               f"[{'GPU' if gpu_utils.pipeline_uses_gpu(pipe) else 'CPU'}]\n{'='*70}")
         all_results[name] = nested_cv_evaluate(X, y, name, pipe, grid)
     return all_results
-
 
 # ---------------------------------------------------------------------------
 # POOLED OUT-OF-FOLD METRICS
@@ -726,7 +726,6 @@ def _bootstrap_importance(pipe, X_boot, y_boot, model_type) -> pd.Series:
     else:
         raise ValueError(f"model_type '{model_type}' non gestito in _bootstrap_importance")
 
-
 def bootstrap_stability_selection(X: pd.DataFrame, y: pd.Series,
                                    model_name: str, best_params: dict,
                                    n_bootstrap: int = config.N_BOOTSTRAP,
@@ -738,11 +737,11 @@ def bootstrap_stability_selection(X: pd.DataFrame, y: pd.Series,
     "Selezionata" = tra le top_k_features per importanza in quel bootstrap
     (default: sqrt(n_feature), euristica comune quando non c'è un criterio
     di sparsità nativo come per l'Elastic Net).
- 
+
     use_gpu : default False. 200 fit sequenziali su ~50 pazienti sono dominati
     dal costo di lancio dei kernel: la CPU è quasi sempre più veloce. La Random
     Forest cuML non espone feature_importances_, quindi per lei resta sempre CPU.
- 
+
     NB il criterio qui è "top-K", non "diverso da zero".
     Con L1 forte i due criteri spesso coincidono nella pratica, ma non sono
     matematicamente la stessa cosa.
@@ -751,16 +750,16 @@ def bootstrap_stability_selection(X: pd.DataFrame, y: pd.Series,
     if model_type is None:
         raise ValueError(f"Stability selection non supportata per '{model_name}': "
                           f"aggiungilo a MODEL_TYPE_MAP ('linear' o 'tree').")
- 
+
     if model_type == "tree" and model_name == "random_forest":
         use_gpu = False  # cuML RF: niente feature_importances_
     top_k_features = top_k_features or max(5, int(np.sqrt(X.shape[1])))
     y_bin = (y == config.POSITIVE_CLASS).astype(int).reset_index(drop=True)
     X = X.reset_index(drop=True)
- 
+
     rng = np.random.RandomState(random_state)
     selection_counts = pd.Series(0.0, index=X.columns)
- 
+
     for b in range(n_bootstrap):
         boot_idx = rng.choice(len(X), size=len(X), replace=True) # creo un campion bootstrap, dimensione
             # di X, sorteggiato in modo casuale, possibilità di reinserimento, quindi più copie di un 
@@ -769,27 +768,26 @@ def bootstrap_stability_selection(X: pd.DataFrame, y: pd.Series,
         
         if y_boot.nunique() < 2: # controlla ci siano entrambe le classi 
             continue  # bootstrap degenere, salta
- 
+
         pipe = build_pipeline_from_best_params(model_name, best_params, use_gpu=use_gpu)
         importance = _bootstrap_importance(pipe, X_boot, y_boot, model_type)
- 
+
         top_feats = importance.sort_values(ascending=False).head(top_k_features).index
         selection_counts[top_feats] += 1
- 
+
         if (b + 1) % 50 == 0:
             print(f"[stability_selection] {b+1}/{n_bootstrap} bootstrap completati")
- 
+
     stability_freq = selection_counts / n_bootstrap
     stable_features = stability_freq[
         stability_freq >= config.STABILITY_SELECTION_THRESHOLD
     ].sort_values(ascending=False)
- 
+
     print(f"\n[stability_selection] modello={model_name} | top_k={top_k_features} | "
           f"{len(stable_features)} feature stabili (>= "
           f"{config.STABILITY_SELECTION_THRESHOLD*100:.0f}% dei bootstrap)")
- 
-    return stability_freq, stable_features
 
+    return stability_freq, stable_features
 
 # ---------------------------------------------------------------------------
 # SHAP — interpretabilità del modello 
@@ -824,6 +822,10 @@ def shap_analysis(fitted_pipeline, X: pd.DataFrame, model_type="tree", backgroun
     # applica le trasformazioni precedenti (es. scaler) prima di passare a SHAP
     X_transformed = _transform_with_pipeline_steps(fitted_pipeline, X)
 
+    if model_type == "tree" and gpu_utils.is_cuml_estimator(clf):
+        raise ValueError("TreeExplainer non supporta la RF cuML: usa out_of_fold_shap(..., y=y), "
+                         "che la rifitta su CPU con gli stessi iperparametri.")
+
     if model_type == "tree": # non serve passargli il bg data, il modello di tree sa già che a un certo
             # nodo c'è una proporzione di dati che vanno divisi a dx o a sx. quindi il valore medio è 
             # %dx * output medio dx + $sx * output medio sx, questa viene confrontata con output con 
@@ -838,7 +840,6 @@ def shap_analysis(fitted_pipeline, X: pd.DataFrame, model_type="tree", backgroun
             explainer = shap.LinearExplainer(gpu_utils.linear_coef_intercept(clf), bg_transformed)
         else:
             explainer = shap.LinearExplainer(clf, bg_transformed) # preparati a spiegare il modello
-
         shap_values = explainer.shap_values(X_transformed) # spiega il modello, considerando il paziente
             # che ti viene passato 
     else:
@@ -858,27 +859,28 @@ def _cpu_twin_for_shap(results: dict, fold_i: int, X_train, y_train):
     y_bin = (y_train == config.POSITIVE_CLASS).astype(int)
     return cpu_pipe.fit(X_train, y_bin)
 
+
 def out_of_fold_shap(results: dict, X: pd.DataFrame, model_type: str, y: pd.Series = None):
     """
     Calcola SHAP "out-of-fold": ogni paziente viene spiegato usando il
     modello del fold esterno in cui quel paziente era nel test set, quindi
     MAI col modello che lo ha visto in training.
- 
+
     Perché conta: calcolare SHAP sul training set (come in un fit singolo)
     è ottimistico, soprattutto per modelli ad albero che possono aver
     "memorizzato" pattern specifici di quei pazienti. Questo approccio dà
     un'importanza delle feature coerente con la logica della nested CV già
     usata per le performance, invece di rompere quella logica solo per SHAP.
- 
+
     y : necessario SOLO se il modello è una RF cuML (GPU): SHAP non la supporta,
     quindi per ogni fold si rifitta su CPU una RF con gli stessi iperparametri
     sullo stesso training set. Le SHAP spiegano quindi un modello equivalente
     ma non identico a quello usato per le predizioni (stessa famiglia, stessi
     parametri, algoritmo di split diverso).
- 
+
     Richiede che results provenga da nested_cv_evaluate (contiene
     fitted_models e test_indices per ciascun fold esterno).
- 
+
     Ritorna
     -------
     shap_df : DataFrame (pazienti x feature) con un valore SHAP per cella,
@@ -888,26 +890,25 @@ def out_of_fold_shap(results: dict, X: pd.DataFrame, model_type: str, y: pd.Seri
     n_samples, n_features = X.shape
     shap_matrix = np.full((n_samples, n_features), np.nan)
     all_indices = np.arange(n_samples)
- 
-    for fold_i, (fold_model, test_idx) in enumerate(zip(results["fitted_models"],
-                                                        results["test_indices"])): # zip() function
+
+    for fold_i, (fold_model, test_idx) in enumerate(zip(results["fitted_models"], results["test_indices"])): # zip() function
             # is used to combine two or more iterables into a single iterator of tuples.
         train_idx = np.setdiff1d(all_indices, test_idx) #  finds the set difference of two arrays. It 
             # returns a sorted, 1D array of unique values in the first input array that are not present
             # in the second input array.
         X_train_fold = X.iloc[train_idx]
         X_test_fold = X.iloc[test_idx]
- 
+
         if model_type == "tree" and gpu_utils.is_cuml_estimator(fold_model.named_steps["clf"]):
             if y is None:
                 raise ValueError("Per spiegare una RF cuML passa y a out_of_fold_shap(..., y=y).")
             gpu_utils._warn_once("SHAP: RF cuML non supportata, uso una RF CPU rifittata "
                                  "con gli stessi iperparametri di ogni fold.")
             fold_model = _cpu_twin_for_shap(results, fold_i, X_train_fold, y.iloc[train_idx])
- 
+
         _, shap_values, _ = shap_analysis(
             fold_model, X_test_fold, model_type=model_type, background_data=X_train_fold
-        )   # gli passo il modello allenato su 4/5 fold, e come dataset il 5 fold non visto dal modello.
+        ) # gli passo il modello allenato su 4 fold su 5, e come dataset il 5 fold non visto dal modello.
             # quindi sto valutando la shap sul fold che vede il paziente come test e non come train.
             # background data è usato per calcolare l'effetto della particolare feature. io non posso 
             # semplicemente eliminarla dal modello, il modello non lo accetta, quindi la sostituisco con
@@ -919,22 +920,21 @@ def out_of_fold_shap(results: dict, X: pd.DataFrame, model_type: str, y: pd.Seri
         elif isinstance(sv, np.ndarray) and sv.ndim == 3:
             sv = sv[:, :, 1]         # (n_campioni, n_feature, n_classi) -> classe positiva
         shap_matrix[test_idx, :] = sv
- 
+
     if np.isnan(shap_matrix).any():
         missing = X.index[np.isnan(shap_matrix).any(axis=1)].tolist()
         raise RuntimeError(
             f"Alcuni pazienti non sono coperti da nessun fold di test: {missing}. "
             "Controlla che gli outer fold di nested_cv_evaluate coprano tutto il dataset."
         )
- 
+
     shap_df = pd.DataFrame(shap_matrix, index=X.index, columns=X.columns)
     mean_abs_shap = shap_df.abs().mean(axis=0).sort_values(ascending=False)
- 
+
     print(f"\n[out_of_fold_shap] SHAP calcolata out-of-fold per {n_samples} pazienti, "
           f"{n_features} feature (model_type={model_type})")
- 
-    return shap_df, mean_abs_shap
 
+    return shap_df, mean_abs_shap
 
 # SHAP (SHapley Additive exPlanations), se modelli AI visti come scatole nere SHAP apre la scatola e dice 
 # esattamente ogni feature quanto conta nel risultato finale. valuta non solo la predizione finale del 
@@ -997,7 +997,8 @@ def plot_shap_dependence(shap_df: pd.DataFrame, X: pd.DataFrame, feature: str, o
     plt.savefig(output_path, dpi=150, bbox_inches="tight")
     plt.close()
     print(f"[plot_shap_dependence] salvato in {output_path}")
-    
+
+
 
 # ---------------------------------------------------------------------------
 # BENCHMARK CPU vs GPU — per decidere QUALI modelli conviene mandare su GPU
@@ -1033,4 +1034,3 @@ def benchmark_backends(X: pd.DataFrame, y: pd.Series, n_repeats: int = 3):
     df = pd.DataFrame(rows)
     print(df.to_string(index=False))
     return df
-
