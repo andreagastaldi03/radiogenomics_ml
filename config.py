@@ -40,7 +40,7 @@ DATA_SOURCE = "both"
 # Con n=54 pazienti la CPU può essere più veloce della GPU per i modelli
 # piccoli: usa ml_pipeline.benchmark_backends(X, y) per decidere cosa abilitare.
 # ---------------------------------------------------------------------------
-USE_GPU = "gpu"
+USE_GPU = "cpu"
 GPU_MODELS = {
     "elastic_net": True,
     "random_forest": True,
