@@ -262,7 +262,7 @@ def build_pipeline_from_best_params(model_name: str, best_params: dict, use_gpu=
     rieseguire lo stesso modello "migliore" fuori dalla nested CV (test di
     permutazione, batch effect), senza doverlo hardcodare a elastic_net.
     """
-    models = get_model_grid()
+    models = get_model_grid(use_gpu=use_gpu)
     if model_name not in models:
         raise ValueError(f"Modello '{model_name}' non trovato. Disponibili: {list(models.keys())}")
     pipe, _ = models[model_name]
