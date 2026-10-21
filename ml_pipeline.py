@@ -255,7 +255,7 @@ def majority_vote_params(best_params_list):
         # per scelta di fold diversi
         
         
-def build_pipeline_from_best_params(model_name: str, best_params: dict):
+def build_pipeline_from_best_params(model_name: str, best_params: dict, use_gpu=False):
     """
     Ricostruisce (non fittata) la pipeline di un modello con un set di
     iperparametri fissato, qualunque sia il tipo di modello — usata per
