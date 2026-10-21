@@ -21,6 +21,7 @@ import pandas as pd
 import config
 import data_utils
 import ml_pipeline
+import gpu_utils
 
 
 def summarize_results(all_results: dict) -> pd.DataFrame:
@@ -29,6 +30,7 @@ def summarize_results(all_results: dict) -> pd.DataFrame:
     for model_name, res in all_results.items():
         rows.append({
             "model": model_name,
+            "backend": res.get("backend", "cpu"),
             "auc_mean": np.mean(res["auc"]),
             "auc_sd": np.std(res["auc"]),
             "balanced_accuracy_mean": np.mean(res["balanced_accuracy"]),
@@ -43,6 +45,9 @@ def main():
     config.OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
     run_output_dir = config.OUTPUT_DIR / config.DATA_SOURCE
     run_output_dir.mkdir(parents=True, exist_ok=True)
+    
+    # Backend CPU/GPU effettivamente disponibile (stampa un riepilogo)
+    gpu_utils.print_backend_report()
 
     # ------------------------------------------------------------------
     # 1) Caricamento dati
@@ -115,7 +120,7 @@ def main():
 
             best_results = all_results[best_model_name]
             shap_df, mean_abs_shap = ml_pipeline.out_of_fold_shap(
-                best_results, X_reduced, model_type
+                best_results, X_reduced, model_type, y=y
             )
 
             # matrice completa pazienti x feature: riusabile anche come input
@@ -165,6 +170,8 @@ def main():
         "n_outer_folds": config.N_OUTER_FOLDS,
         "n_inner_folds": config.N_INNER_FOLDS,
         "n_bootstrap_stability": config.N_BOOTSTRAP,
+        "use_gpu_setting": config.USE_GPU,
+        "backend_per_model": {n: res.get("backend", "cpu") for n, res in all_results.items()},
     }
     with open(run_output_dir / "run_config.json", "w") as f:
         json.dump(run_config, f, indent=2)

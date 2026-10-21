@@ -28,6 +28,27 @@ POSITIVE_CLASS = "ADK"   # classe codificata come 1 nelle metriche
 DATA_SOURCE = "both"
 
 # ---------------------------------------------------------------------------
+# BACKEND DI CALCOLO: CPU / GPU
+#
+# "auto" -> usa la GPU per i modelli abilitati in GPU_MODELS se hardware e
+#           librerie sono disponibili, altrimenti CPU (paracadute silenzioso)
+# "gpu"  -> come "auto", ma avvisa in modo esplicito se la GPU non è utilizzabile
+# "cpu"  -> forza la CPU (comportamento della versione originale)
+#
+# Requisiti GPU: xgboost >= 2.0 build CUDA per "xgboost"; RAPIDS cuML
+# (cuml + cupy) per elastic_net, random_forest, svm_linear.
+# Con n=54 pazienti la CPU può essere più veloce della GPU per i modelli
+# piccoli: usa ml_pipeline.benchmark_backends(X, y) per decidere cosa abilitare.
+# ---------------------------------------------------------------------------
+USE_GPU = "gpu"
+GPU_MODELS = {
+    "elastic_net": True,
+    "random_forest": True,
+    "svm_linear": True,
+    "xgboost": True,
+}
+
+# ---------------------------------------------------------------------------
 # RIDUZIONE FEATURE "NEUTRA" (indipendente dalla label)
 # ---------------------------------------------------------------------------
 VARIANCE_THRESHOLD = 0.01          # rimuove feature quasi costanti (dopo standardizzazione su varianza relativa)
