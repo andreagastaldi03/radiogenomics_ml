@@ -1,6 +1,5 @@
 """
-Configurazione della selezione di feature radiomiche guidata dalla rete
-(file NUOVO: nessun altro file di configurazione viene toccato).
+Configurazione della selezione di feature radiomiche guidata dalla rete.
 
 I risultati vanno in OUTPUT_DIR/network_selection/, separati da quelli delle
 altre pipeline.
@@ -9,7 +8,6 @@ altre pipeline.
 import config
 
 # Reti NEUTRAL (costruite senza etichetta): niente leakage nella selezione.
-# Percorsi come in plot_tpi1_zoom.py; adattali se i file sono altrove.
 _NET = config.OUTPUT_DIR / "network" / "neutral"
 NETWORK_GRAPHML = {
     "separate": _NET / "separate" / "network_confirmed.graphml",  # FDR per blocco
@@ -34,7 +32,7 @@ REDUNDANCY_MAX_ABS_R = 0.7
 
 # Blocco genomico usato quando data_source = "both": uguale per TUTTE le
 # specifiche, così le differenze dipendono solo dalla parte radiomica.
-GENE_REDUCTION = dict(k_gen=5, mode="pca")
+GENE_REDUCTION = dict(k_gen=5, mode="medoid")
 
 # Controllo: quante estrazioni casuali di k feature dai nodi radiomici della
 # rete (stesso pool di candidati dei selettori di rete).
