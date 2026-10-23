@@ -23,6 +23,7 @@ from sklearn.linear_model import LogisticRegression
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.svm import SVC
 from sklearn.base import clone
+from sklearn.calibration import CalibratedClassifierCV
 from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import FunctionTransformer
 from sklearn.metrics import (
@@ -54,7 +55,9 @@ def _wants_gpu(use_gpu, name: str) -> bool:
     """use_gpu può essere bool (tutti i modelli) o dict {modello: bool}.
     Anche se richiesta, la GPU viene usata solo se realmente disponibile."""
     wanted = use_gpu.get(name, False) if isinstance(use_gpu, dict) else bool(use_gpu)
+    # isinstance(object, classinfo) -> mi dice se object è un oggetto classinfo (return True or False)
     return bool(wanted) and gpu_utils.is_available(name)
+# underscore (_) indica una funzione privata o interna
 
 
 def get_model_grid(use_gpu=False):
@@ -100,6 +103,7 @@ def get_model_grid(use_gpu=False):
             ("scaler", StandardScaler()),
             ("clf", LogisticRegression(
                 penalty="elasticnet", solver="saga", max_iter=5000,
+                l1_ratio=0.5,
                 random_state=config.RANDOM_STATE
             )),
         ])
@@ -129,6 +133,7 @@ def get_model_grid(use_gpu=False):
         try:
             from cuml.ensemble import RandomForestClassifier as cuRF
             # n_streams=1 -> risultati riproducibili a parità di seed.
+            # stream sequenza di operazioni e calcoli che vengono eseguiti in ordine sulla scheda.
             # cuML richiede max_depth intero: None (illimitata) -> 16 (il default
             # cuML); con n=54 gli alberi non arrivano comunque a quella profondità.
             rf_pipe = Pipeline([
@@ -161,15 +166,26 @@ def get_model_grid(use_gpu=False):
             from cuml.svm import SVC as cuSVC
             svm_pipe = Pipeline([
                 ("scaler", StandardScaler()),
-                ("clf", cuSVC(kernel="linear", probability=True,
-                              random_state=config.RANDOM_STATE)),
+                ("clf", CalibratedClassifierCV(
+                    # convertire distanza geometrica in probabilità calibrata. 
+                    # CalibratedClassifierCV prende i margini continui dell'SVM 
+                    # e ci adatta sopra una sigmoide per mapparli nell'intervallo [0, 1].
+                    cuSVC(kernel="linear", random_state=config.RANDOM_STATE),
+                    ensemble=False
+                    # Di default, CalibratedClassifierCV esegue una Cross-Validation interna a 5 fold
+                    # SVM singola in un piccolo ensemble, impostando ensemble=False il modello finale
+                    # conservato è uno solo, addestrato sull'intero dataset
+                ))
             ])
         except Exception as exc:
             gpu_utils._warn_once(f"svm_linear: costruzione cuML fallita ({exc!r}) -> CPU")
     if svm_pipe is None:
         svm_pipe = Pipeline([
             ("scaler", StandardScaler()),
-            ("clf", SVC(kernel="linear", probability=True, random_state=config.RANDOM_STATE)),
+            ("clf", CalibratedClassifierCV(
+                SVC(kernel="linear", random_state=config.RANDOM_STATE),
+                ensemble=False
+            ))
         ])
     svm_grid = {
         "clf__C": [0.001, 0.01, 0.1, 1, 10],
@@ -289,6 +305,8 @@ def nested_cv_evaluate(X: pd.DataFrame, y: pd.Series, model_name: str,
             # per far emergere gli errori invece di trasformarli in NaN.
             res = _nested_cv_core(X, y, model_name, pipe, grid, n_outer, n_inner,
                                   random_state, search_n_jobs=1, error_score="raise")
+            # Lanciare n_jobs > 1 con modelli GPU creerebbe più processi Python che 
+            # tentano di comunicare simultaneamente con la scheda video, causando gravi problemi
             res["backend"] = "gpu"
             return res
         except Exception as exc:
@@ -610,24 +628,19 @@ def run_pooled_oof_analysis(all_results: dict, X: pd.DataFrame, y: pd.Series, ou
         oof_df.to_csv(
             output_dir
             / f"{model_name}_oof_predictions.csv",
-            index=False,
-        )
+            index=False)
         
         # ----------------------------------------------------------
         # CI bootstrap sulla AUC pooled (riusa le predizioni OOF appena
         # calcolate, nessun nuovo fit)
         # ----------------------------------------------------------
         auc_observed, auc_ci_low, auc_ci_high, boot_aucs = bootstrap_pooled_auc_ci(
-            oof_df["y_true"].to_numpy(), oof_df["oof_probability"].to_numpy()
-        )
- 
+            oof_df["y_true"].to_numpy(), oof_df["oof_probability"].to_numpy()) 
         pd.Series(boot_aucs, name="pooled_auc_bootstrap").to_csv(
-            output_dir / f"{model_name}_pooled_auc_bootstrap.csv", index=False
-        )
+            output_dir / f"{model_name}_pooled_auc_bootstrap.csv", index=False)
         plot_auc_bootstrap_ci(
             boot_aucs, auc_observed, auc_ci_low, auc_ci_high, model_name,
-            output_dir / f"{model_name}_pooled_auc_bootstrap.png"
-        )
+            output_dir / f"{model_name}_pooled_auc_bootstrap.png")
 
         # ----------------------------------------------------------
         # Risultati fold-level
@@ -644,18 +657,15 @@ def run_pooled_oof_analysis(all_results: dict, X: pd.DataFrame, y: pd.Series, ou
         # ----------------------------------------------------------
         rows.append({
             "model": model_name,
-
             # AUC
             "auc_mean_fold": auc_mean,
             "auc_sd_fold": auc_sd,
             "pooled_oof_auc": (metrics["pooled_oof_auc"]),
-
             # Balanced accuracy
             "balanced_accuracy_mean_fold": (balacc_mean),
             "balanced_accuracy_sd_fold": (balacc_sd),
             "pooled_oof_balanced_accuracy": 
                         (metrics["pooled_oof_balanced_accuracy"]),
-
             # F1
             "f1_mean_fold": f1_mean,
             "f1_sd_fold": f1_sd,
@@ -665,43 +675,29 @@ def run_pooled_oof_analysis(all_results: dict, X: pd.DataFrame, y: pd.Series, ou
         # ----------------------------------------------------------
         # Stampa
         # ----------------------------------------------------------
-        print(
-            f"\n[{model_name}]"
-        )
-
-        print(
-            f"  AUC: "
+        print(f"\n[{model_name}]")
+        print(f"  AUC: "
             f"{auc_mean:.3f} ± {auc_sd:.3f}"
             f" | pooled = "
-            f"{metrics['pooled_oof_auc']:.3f}"
-        )
-
-        print(
-            f"  BalAcc: "
+            f"{metrics['pooled_oof_auc']:.3f}")
+        print(f"  BalAcc: "
             f"{balacc_mean:.3f} ± {balacc_sd:.3f}"
             f" | pooled = "
-            f"{metrics['pooled_oof_balanced_accuracy']:.3f}"
-        )
-
-        print(
-            f"  F1: "
+            f"{metrics['pooled_oof_balanced_accuracy']:.3f}")
+        print(f"  F1: "
             f"{f1_mean:.3f} ± {f1_sd:.3f}"
             f" | pooled = "
-            f"{metrics['pooled_oof_f1']:.3f}"
-        )
+            f"{metrics['pooled_oof_f1']:.3f}")
 
     # --------------------------------------------------------------
     # Tabella finale
     # --------------------------------------------------------------
     pooled_summary = (pd.DataFrame(rows).sort_values("pooled_oof_auc", ascending=False)
-                      .reset_index(drop=True)
-    )
-
+                      .reset_index(drop=True))
     pooled_summary.to_csv(
         output_dir
         / "pooled_oof_model_comparison.csv",
-        index=False,
-    )
+        index=False,)
 
     return pooled_summary
 

@@ -8,6 +8,10 @@ Architettura
   con scikit-learn). Lo StandardScaler resta quello di scikit-learn su CPU:
   con poche decine di pazienti il costo è nullo, e così `_transform_with_
   pipeline_steps` e SHAP continuano a funzionare identici.
+  -- API sta per Application Programming Interface, è il "pannello di controllo" 
+     o il punto di contatto con cui un pezzo di software permette a un programmatore 
+     di comunicare con lui. Stabilisce quali funzioni puoi chiamare, come si chiamano, 
+     quali parametri accettano e cosa restituiscono.
 
 Il paracadute opera su tre livelli:
 1. rilevamento: se cuML / CUDA / xgboost-GPU non sono utilizzabili, il modello
@@ -44,7 +48,12 @@ def _warn_once(msg: str):
 # ---------------------------------------------------------------------------
 # RILEVAMENTO
 # ---------------------------------------------------------------------------
-@functools.lru_cache(maxsize=1)
+@functools.lru_cache(maxsize=1) 
+# decoratore della libreria standard di Python (functools) che implementa una 
+# cache per i risultati di una funzione, memorizzando solo l'ultimo risultato 
+# calcolato. LRU (Least Recently Used), quando la cache raggiunge il limite 
+# massimo di spazio e arriva un nuovo risultato, viene cancellato l'elemento 
+# a cui non si accede da più tempo.
 def cuml_available() -> bool:
     """True se c'è almeno una GPU CUDA visibile e cuML è importabile."""
     try:
@@ -65,10 +74,12 @@ def cuml_available() -> bool:
 def xgb_gpu_kwargs() -> dict:
     """Parametri GPU di XGBoost: sintassi >=2.0 oppure legacy (<2.0)."""
     import xgboost as xgb
-    major = int(xgb.__version__.split(".")[0])
+    major = int(xgb.__version__.split(".")[0]) # Questa riga estrae il primo numero della versione
     if major >= 2:
         return {"device": "cuda", "tree_method": "hist"}
     return {"tree_method": "gpu_hist"}
+# XGBoost ha modificato radicalmente il modo in cui gestisce l'accelerazione hardware 
+# a partire dalla versione 2.0
 
 
 @functools.lru_cache(maxsize=1)
@@ -78,6 +89,7 @@ def xgboost_gpu_available() -> bool:
         import xgboost as xgb
         rng = np.random.RandomState(0)
         X, y = rng.rand(20, 3), np.array([0, 1] * 10)
+        # una matrice di 20 righe e 3 colonne di numeri casuali + array con 10 zeri e 10 uni alternati
         with warnings.catch_warnings():
             warnings.simplefilter("ignore")
             xgb.XGBClassifier(n_estimators=2, **xgb_gpu_kwargs()).fit(X, y)
@@ -99,7 +111,9 @@ def resolve_backends(model_names=ALL_MODELS) -> dict:
     config.GPU_MODELS e la disponibilità reale. Ritorna {modello: bool}.
     """
     mode = str(getattr(config, "USE_GPU", "auto")).lower()
+    # cerca l'attr USE_GPU nel modulo config. Se non esiste, usa "auto" come fallback 
     enabled = getattr(config, "GPU_MODELS", None) or {}
+    # recupera un dizionario con i consensi per i singoli modelli. 
     out = {}
     for name in model_names:
         if mode == "cpu" or not enabled.get(name, True):
@@ -140,6 +154,7 @@ def to_float32(X):
 
 def is_cuml_estimator(est) -> bool:
     return type(est).__module__.startswith("cuml")
+    # Controlla se un generico oggetto/modello est appartiene alla suite RAPIDS cuML.
 
 
 def pipeline_uses_gpu(pipe) -> bool:
@@ -161,3 +176,5 @@ def linear_coef_intercept(clf):
     coef = np.asarray(clf.coef_, dtype=float).ravel()
     intercept = float(np.asarray(clf.intercept_, dtype=float).ravel()[0])
     return coef, intercept
+# Estrae i coefficienti angolari/pesi (coef_) e il termine noto/intercetta (intercept_) 
+# da un modello lineare addestrato, restituendoli in un formato NumPy 1D standard

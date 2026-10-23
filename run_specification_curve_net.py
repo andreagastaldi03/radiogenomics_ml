@@ -1,6 +1,6 @@
 """
 Entry point della specification curve con selezione radiomica guidata dalla
-rete (file NUOVO). Solo curva descrittiva + tabelle di lettura.
+rete. Solo curva descrittiva + tabelle di lettura.
 
 Uso:
     python run_specification_curve_net.py

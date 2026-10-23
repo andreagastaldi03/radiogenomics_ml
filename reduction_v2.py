@@ -86,6 +86,8 @@ def near_zero_variance_mask(X: pd.DataFrame, max_dominant_freq: float = 0.9,
             keep[c] = False
         else:
             keep[c] = v.value_counts(normalize=True).iloc[0] <= max_dominant_freq
+            # calcola la frequenza relativa di ogni valore unico presente nella colonna, iloc[0] 
+            # estrae la frequenza del valore più comune
     return pd.Series(keep)
 
 
@@ -170,7 +172,7 @@ class BlockReducer(BaseEstimator, TransformerMixin):
 
     # -- fit ---------------------------------------------------------------
     def fit(self, X: pd.DataFrame, y=None):
-        if not isinstance(X, pd.DataFrame):
+        if not isinstance(X, pd.DataFrame): # if X is pd.Dataframe
             raise TypeError("BlockReducer richiede un DataFrame con colonne rad__* / gen__*")
         if self.mode not in ("medoid", "pca"):
             raise ValueError("mode deve essere 'medoid' o 'pca'")
@@ -250,17 +252,24 @@ class BlockReducer(BaseEstimator, TransformerMixin):
             dist = np.clip(1.0 - corr, 0.0, None)
             np.fill_diagonal(dist, 0.0)
             Z = linkage(squareform(dist, checks=False), method="average")
+            # comprime la matrice quadrata nel vettore triangolare superiore 
+            # linkage costruisce il dendrogramma
             if k is not None:
                 clusters = (np.arange(1, len(cols) + 1) if len(cols) <= k
                             else fcluster(Z, t=int(k), criterion="maxclust"))
             else:
                 clusters = fcluster(Z, t=1 - self.corr_threshold, criterion="distance")
+                # output clusters è un array NumPy di numeri interi rappresentanti l'ID del cluster
 
         groups = {}
         for col, cid in zip(cols, clusters):
             groups.setdefault(cid, []).append(col)
+            # se chiave cid non esiste -> lista vuota, altrimenti lista associata, appende feature alla chiave
         # ordine deterministico: cluster più grandi per primi
         ordered = sorted(groups.values(), key=lambda m: (-len(m), cols.index(m[0])))
+        # len(m) è la cardinalità del gruppo (quante feature contiene il cluster). Il segno meno inverte l'ordine 
+        # naturale crescente di sorted. In caso parità secondo criterio: m[0] è la prima feature contenuta nel gruppo, 
+        # cols.index(m[0]) restituisce l'indice numerico di quella feature nella lista originale cols.
 
         units = []
         for j, members in enumerate(ordered, start=1):
@@ -269,7 +278,9 @@ class BlockReducer(BaseEstimator, TransformerMixin):
                 medoid, within = members[0], np.nan
             else:
                 sub = corr_df.loc[members, members]
+                # estrae la sottomatrice di correlazione tra le sole variabili del cluster
                 score = (sub.sum(axis=1) - 1.0) / (m - 1)
+                # somma le correlazioni con le altre escludendo se stessa e divide per il numero delle altre variabili
                 medoid, within = score.idxmax(), float(score.mean())
 
             unit = {"block": block, "members": members, "medoid": medoid,
@@ -282,6 +293,7 @@ class BlockReducer(BaseEstimator, TransformerMixin):
                 sd = M.std(axis=0, ddof=0)
                 sd[sd == 0] = 1.0
                 Zs = (M - mu) / sd
+                # Standardizzazione locale
                 _, S, Vt = np.linalg.svd(Zs, full_matrices=False)
                 loading = Vt[0]
                 # segno fissato: PC1 positivamente correlata con il medoide
@@ -289,7 +301,8 @@ class BlockReducer(BaseEstimator, TransformerMixin):
                 if np.dot(Zs @ loading, med_z) < 0:
                     loading = -loading
                 unit.update(kind="pc", mean=mu, std=sd, loading=loading,
-                            evr=float(S[0] ** 2 / np.sum(S ** 2)),
+                            evr=float(S[0] ** 2 / np.sum(S ** 2)), 
+                            # rapporto di varianza spiegata (Explained Variance Ratio)
                             name=f"{prefix}PC_{tag}{j:02d}_n{m}_{_short(medoid)}")
             units.append(unit)
         return units

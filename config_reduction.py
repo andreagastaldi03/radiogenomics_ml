@@ -36,4 +36,4 @@ SPECS = {
 
 # Per queste specifiche si eseguono anche stability selection e SHAP (costosi);
 # per tutte le altre solo nested CV + metriche pooled.
-SPECS_FULL_ANALYSIS = ["t4s1_g5_medoid"]
+SPECS_FULL_ANALYSIS = ["t4s1_g5_medoid", "t4s1_g5_pca", "t8s2_g8_medoid", "thr050_medoid"]
