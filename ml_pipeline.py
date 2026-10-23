@@ -188,7 +188,7 @@ def get_model_grid(use_gpu=False):
             ))
         ])
     svm_grid = {
-        "clf__C": [0.001, 0.01, 0.1, 1, 10],
+        "clf__estimator__C": [0.001, 0.01, 0.1, 1, 10],
     }
     models["svm_linear"] = (svm_pipe, svm_grid)
 
