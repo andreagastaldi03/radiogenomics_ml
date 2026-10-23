@@ -831,11 +831,10 @@ def shap_analysis(fitted_pipeline, X: pd.DataFrame, model_type="tree", backgroun
     elif model_type == "linear":
         bg = background_data if background_data is not None else X
         bg_transformed = _transform_with_pipeline_steps(fitted_pipeline, bg)
-        if gpu_utils.is_cuml_estimator(clf):
-            # shap non conosce gli oggetti cuML: gli passo (coef, intercept) in numpy
-            explainer = shap.LinearExplainer(gpu_utils.linear_coef_intercept(clf), bg_transformed)
-        else:
-            explainer = shap.LinearExplainer(clf, bg_transformed) # preparati a spiegare il modello
+        # Estrae SEMPRE (coef, intercept), bypassando l'incompatibilità di SHAP 
+        # con cuML o CalibratedClassifierCV
+        coef_tuple = gpu_utils.linear_coef_intercept(clf)
+        explainer = shap.LinearExplainer(coef_tuple, bg_transformed)
         shap_values = explainer.shap_values(X_transformed) # spiega il modello, considerando il paziente
             # che ti viene passato 
     else:
