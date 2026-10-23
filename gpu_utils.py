@@ -173,6 +173,9 @@ def pipeline_uses_gpu(pipe) -> bool:
 
 def linear_coef_intercept(clf):
     """(coef 1D, intercept scalare) come numpy puri, da sklearn o cuML."""
+    if hasattr(clf, "calibrated_classifiers_"):
+        # Con ensemble=False c'è un solo classificatore calibrato
+        clf = clf.calibrated_classifiers_[0].estimator
     coef = np.asarray(clf.coef_, dtype=float).ravel()
     intercept = float(np.asarray(clf.intercept_, dtype=float).ravel()[0])
     return coef, intercept
