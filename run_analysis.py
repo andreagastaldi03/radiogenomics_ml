@@ -119,7 +119,7 @@ def main():
                   f"{best_model_name} ({model_type})")
 
             best_results = all_results[best_model_name]
-            shap_df, mean_abs_shap = ml_pipeline.out_of_fold_shap(
+            shap_df, mean_abs_shap, shap_percentage = ml_pipeline.out_of_fold_shap(
                 best_results, X_reduced, model_type, y=y
             )
 
@@ -128,8 +128,10 @@ def main():
             shap_df.to_csv(run_output_dir / f"shap_values_{best_model_name}_out_of_fold.csv")
             mean_abs_shap.to_csv(
                 run_output_dir / f"shap_feature_importance_{best_model_name}.csv",
-                header=["mean_abs_shap"]
-            )
+                header=["mean_abs_shap"])
+            shap_percentage.to_csv(
+                run_output_dir / f"shap_feature_importance_percentage_{best_model_name}.csv",
+                header=["shap_percentage"])
 
             ml_pipeline.plot_shap_bar(
                 mean_abs_shap, run_output_dir / f"shap_bar_{best_model_name}.png"
@@ -146,13 +148,8 @@ def main():
 
             print("\n[SHAP] Top 15 feature per importanza media |SHAP| (out-of-fold):")
             print(mean_abs_shap.head(15))
-            
-            shap_sum = mean_abs_shap.sum()
 
             print(f"\n[SHAP] Somma totale valori shap medi = {shap_sum:.4f}")
-            
-            # Calcola la percentuale di contributo di ogni feature sul totale
-            shap_percentage = (mean_abs_shap / mean_abs_shap.sum()) * 100
 
             print("\n[SHAP] Top 15 feature in percentuale di impatto:")
             print(shap_percentage.head(15).round(2).astype(str) + "%")

@@ -39,6 +39,7 @@ import config
 
 def load_network(path) -> nx.Graph:
     G = nx.read_graphml(path)
+    # nodo partenza, nodo arrivo, dict con attr associati all'arco
     for _, _, d in G.edges(data=True):
         d["weight"] = abs(float(d.get("weight", 1.0)))
         d["correlation"] = float(d.get("correlation", d["weight"]))
@@ -49,11 +50,14 @@ def load_network(path) -> nx.Graph:
 def _eigenvector_per_component(G: nx.Graph) -> dict:
     out = {}
     for comp in nx.connected_components(G):
+        # Ciascun comp è un set contenente i nodi che appartengono a quella specifica componente
         if len(comp) < 3:
             out.update({n: 0.0 for n in comp})
         else:
             out.update(nx.eigenvector_centrality_numpy(G.subgraph(comp), weight="weight"))
     return out
+# dizionario contenente ogni nodo del grafo originale con il rispettivo valore di centralità relativo 
+# alla propria componente di appartenenza
 
 
 def radiomic_node_scores(G: nx.Graph, seed: int = config.RANDOM_STATE) -> pd.DataFrame:
@@ -65,6 +69,9 @@ def radiomic_node_scores(G: nx.Graph, seed: int = config.RANDOM_STATE) -> pd.Dat
     H = G.subgraph(rad)
     comms = nx.community.louvain_communities(H, weight="weight", seed=seed)
     comm_of = {n: i for i, c in enumerate(sorted(comms, key=len, reverse=True)) for n in c}
+    # Ordina le comunità dalla più grande alla più piccola in base al numero di elementi
+    # Assegna un indice progressivo (0, 1, 2, ...) a ciascuna comunità
+    # Assegna quell'indice a OGNI singolo nodo contenuto in quella comunità
 
     rows = {}
     for n in rad:
@@ -94,12 +101,16 @@ def select_radiomic_features(G: nx.Graph, scores: pd.DataFrame, method: str, k: 
     if method == "random":
         rng = rng or np.random.RandomState(config.RANDOM_STATE)
         return list(rng.choice(scores.index.to_numpy(), size=min(k, len(scores)), replace=False))
+    # Prende casualmente k indici (nomi di feature) senza reimmissione, baseline di controllo nullo
 
     if method == "community_rep":
+        # miglior rappresentante per ciascun modulo
         reps = []
         for _, grp in scores.groupby("community"):
+        # pandas può raggruppare le righe di scores in base all'ID numerico che è stato assegnato
             best = grp.sort_values(["gene_strength", "strength"], ascending=False).iloc[0]
             reps.append((best["gene_strength"], len(grp), best["strength"], best.name))
+            # Salva una tupla
         reps.sort(key=lambda t: (-t[0], -t[1], -t[2]))
         return [r[3] for r in reps[:k]]
 
@@ -111,6 +122,7 @@ def select_radiomic_features(G: nx.Graph, scores: pd.DataFrame, method: str, k: 
     selected = []
     for cand in order.index:
         if len(selected) >= k:
+        # se raggiunto k feature, interrompo
             break
         if not _redundant(G, cand, selected, redundancy_max_abs_r):
             selected.append(cand)

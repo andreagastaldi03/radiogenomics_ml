@@ -925,11 +925,13 @@ def out_of_fold_shap(results: dict, X: pd.DataFrame, model_type: str, y: pd.Seri
 
     shap_df = pd.DataFrame(shap_matrix, index=X.index, columns=X.columns)
     mean_abs_shap = shap_df.abs().mean(axis=0).sort_values(ascending=False)
+    shap_sum = mean_abs_shap.sum()
+    shap_percentage = (mean_abs_shap / mean_abs_shap.sum()) * 100
 
     print(f"\n[out_of_fold_shap] SHAP calcolata out-of-fold per {n_samples} pazienti, "
           f"{n_features} feature (model_type={model_type})")
 
-    return shap_df, mean_abs_shap
+    return shap_df, mean_abs_shap, shap_percentage
 
 # SHAP (SHapley Additive exPlanations), se modelli AI visti come scatole nere SHAP apre la scatola e dice 
 # esattamente ogni feature quanto conta nel risultato finale. valuta non solo la predizione finale del 

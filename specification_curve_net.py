@@ -89,6 +89,12 @@ def run_specification_curve_net(model_types=None, n_folds=None, n_repeats=None,
             scores = scores.drop(index=missing)
         nets[name] = (G, scores)
     pool = list(nets[next(iter(nets))][1].index)   # pool di candidati dei controlli casuali
+    # crea un iteratore sulle chiavi del dizionario nets
+    # estrae il primo elemento dall'iteratore, cioè il nome della prima rete inserita nel dizionario
+    # recupera la tupla (G, scores) corrispondente a quella prima rete
+    # seleziona il secondo elemento della tupla, ovvero il DataFrame scores
+    # estrae l'indice del DataFrame scores, che contiene i nomi delle feature radiomiche valide   
+    # Il risultato salvato in pool rappresenta l'insieme (pool) comune di feature radiomiche analizzabili
 
     rows, selected_rows, draw_rows = [], [], []
 

@@ -177,7 +177,7 @@ def _one_consensus_run(y_labels: pd.Series, ctx: dict, random_state: int,
         X_reduced, y_bin, best_model_name, best_params,
         n_folds=n_folds_shap, random_state=random_state
     )
-    _, mean_abs_shap = ml_pipeline.out_of_fold_shap(shap_results, X_reduced, model_type)
+    _, mean_abs_shap, _ = ml_pipeline.out_of_fold_shap(shap_results, X_reduced, model_type)
 
     permute_spec = not y_labels.equals(ctx["y"])
         # la variabile permute_spec assume il valore True se le etichette y_labels sono 

@@ -76,13 +76,15 @@ def stability_and_shap(all_results, pooled_summary, X_red, y, out_dir):
 
     best_results = all_results[best_model_name]
     if _SHAP_ACCEPTS_Y:
-        shap_df, mean_abs_shap = ml_pipeline.out_of_fold_shap(best_results, X_red, model_type, y=y)
+        shap_df, mean_abs_shap, shap_percentage = ml_pipeline.out_of_fold_shap(best_results, X_red, model_type, y=y)
     else:
-        shap_df, mean_abs_shap = ml_pipeline.out_of_fold_shap(best_results, X_red, model_type)
+        shap_df, mean_abs_shap, shap_percentage = ml_pipeline.out_of_fold_shap(best_results, X_red, model_type)
 
     shap_df.to_csv(out_dir / f"shap_values_{best_model_name}_out_of_fold.csv")
     mean_abs_shap.to_csv(out_dir / f"shap_feature_importance_{best_model_name}.csv",
                          header=["mean_abs_shap"])
+    shap_percentage.to_csv(out_dir / f"shap_feature_importance_percentage_{best_model_name}.csv",
+                         header=["shap_percentage"])
     ml_pipeline.plot_shap_bar(mean_abs_shap, out_dir / f"shap_bar_{best_model_name}.png")
     ml_pipeline.plot_shap_summary(shap_df, X_red, out_dir / f"shap_summary_{best_model_name}.png")
     for feat in mean_abs_shap.head(3).index:
