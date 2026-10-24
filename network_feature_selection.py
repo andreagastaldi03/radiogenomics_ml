@@ -47,6 +47,22 @@ def load_network(path) -> nx.Graph:
     return G
 
 
+def stable_louvain(G: nx.Graph, seed: int = config.RANDOM_STATE, weight: str = "weight") -> list:
+    """
+    Louvain riproducibile. L'implementazione di networkx dipende dall'ordine di
+    iterazione di insiemi di stringhe (quindi da PYTHONHASHSEED): a parità di
+    seed si possono ottenere partizioni diverse tra un'esecuzione e l'altra.
+    Qui il grafo viene ricostruito con nodi e archi in ordine alfabetico e le
+    community restituite in ordine canonico (dimensione decrescente, poi nome).
+    """
+    H = nx.Graph()
+    H.add_nodes_from(sorted(G.nodes()))
+    H.add_weighted_edges_from(
+        sorted((min(u, v), max(u, v), abs(float(d.get(weight, 1.0)))) for u, v, d in G.edges(data=True)))
+    comms = nx.community.louvain_communities(H, weight="weight", seed=seed)
+    return sorted((sorted(c) for c in comms), key=lambda c: (-len(c), c[0]))
+
+
 def _eigenvector_per_component(G: nx.Graph) -> dict:
     out = {}
     for comp in nx.connected_components(G):
@@ -67,8 +83,8 @@ def radiomic_node_scores(G: nx.Graph, seed: int = config.RANDOM_STATE) -> pd.Dat
     betw = nx.betweenness_centrality(G, weight="distance")
 
     H = G.subgraph(rad)
-    comms = nx.community.louvain_communities(H, weight="weight", seed=seed)
-    comm_of = {n: i for i, c in enumerate(sorted(comms, key=len, reverse=True)) for n in c}
+    comms = stable_louvain(G.subgraph(rad), seed=seed)
+    comm_of = {n: i for i, c in enumerate(comms) for n in c}
     # Ordina le comunità dalla più grande alla più piccola in base al numero di elementi
     # Assegna un indice progressivo (0, 1, 2, ...) a ciascuna comunità
     # Assegna quell'indice a OGNI singolo nodo contenuto in quella comunità
