@@ -209,11 +209,18 @@ def _stat_dict(preds, tnames, Tv, Zd, folds, idx, conditional):
 def _one_perm(preds, tnames, Tv, Zd, folds, cls, seed):
     rng = np.random.RandomState(seed)
     idx_in = np.arange(len(cls))
+    # Crea un array di indici da 0 a N-1 (dove N è il numero dei pazienti)
     for c in np.unique(cls):                      # permutazione DENTRO ciascuna classe
+    # Itera sulle classi del fenotipo (es. 0 per ADK e 1 per SCC)
         members = np.where(cls == c)[0]
         idx_in[members] = rng.permutation(members)
+        # Rimescola casualmente gli indici dei pazienti, ma soltanto all'interno dello stesso fenotipo
+        # spezza il legame tra la radiomica e i geni dello specifico paziente a parità di fenotipo
     idx_gl = rng.permutation(len(cls))             # permutazione globale
     cond, _ = _stat_dict(preds, tnames, Tv, Zd, folds, idx_in, True)
+    # cond (ipotesi nulla condizionata), passa la permutazione vincolata alla classe
+    # cosa ci si può aspettare se la radiomica non avesse alcun legame intrinseco con 
+    # i geni oltre a quello mediato dal fenotipo
     unc, _ = _stat_dict(preds, tnames, Tv, np.ones((len(cls), 1)), folds, idx_gl, False)
     return cond, unc
 
