@@ -54,11 +54,12 @@ def main():
     print("  |correlazione| tra le componenti dei due percorsi (righe v2, colonne net):")
     print(pd.DataFrame(C, index=range(1, C.shape[0] + 1), columns=range(1, C.shape[1] + 1)).round(2).to_string())
 
-    y_bin = (yb == config.POSITIVE_CLASS).astype(int)
-    print("\nVALUTAZIONE ATTUALE (linear, stesso seed)")
-    for name, P in (("v2 ", P_v2), ("net", P_net)):
-        y_aligned = (y_bin.loc[P.index] if hasattr(y_bin, "loc") else y_bin).reset_index(drop=True)
-        res = sc._cv_eval(P.reset_index(drop=True), y_aligned, "linear", 5,
+    common_idx = P_v2.index.intersection(P_net.index)
+    y_common = (yb.loc[common_idx] == config.POSITIVE_CLASS).astype(int).reset_index(drop=True)
+
+    print("\nVALUTAZIONE ATTUALE (linear, stesso seed - solo pazienti comuni)")
+    for name, P in (("v2 ", P_v2.loc[common_idx]), ("net", P_net.loc[common_idx])):
+        res = sc._cv_eval(P.reset_index(drop=True), y_common, "linear", 5,
                           random_state=config.RANDOM_STATE, n_jobs_model=-1)
         print(f"  {name}: auc_pooled = {res[2]:.3f}")
     print("\nNei file caricati: v2 = 0.868, net = 0.663. Se qui i due valori coincidono, "
